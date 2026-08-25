@@ -127,3 +127,21 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .btn-danger { color: hsl(var(--destructive)); background: hsl(var(--destructive) / .08); border-color: hsl(var(--destructive) / .2); }
 .card { background: hsl(var(--card)); border: 1px solid hsl(var(--card-border)); border-radius: .85rem; box-shadow: 0 2px 10px hsl(218 31% 18% / .035); }
 .label { display: block; font-size: .68rem; line-height: 1; letter-spacing: .1em; text-transform: uppercase; color: hsl(var(--muted-foreground)); font-weight: 700; margin-bottom: .5rem; }
+
+/* Mobile ergonomics: keep the signal desk comfortable on narrow phones. */
+@media (max-width: 640px) {
+  html, body, #root { max-width: 100%; overflow-x: hidden; }
+  .shell-grid { background-size: 22px 22px; }
+  .btn { min-height: 44px; }
+  .field { min-height: 44px; }
+  header .btn { padding-inline: .75rem; }
+  .card { border-radius: .75rem; }
+}
+
+@media (max-width: 380px) {
+  header { padding-inline: .75rem !important; }
+  header .btn { font-size: .75rem; }
+  main .mx-auto { padding-inline: .75rem; }
+  main h1 { font-size: 1.7rem; line-height: 1.1; }
+  .card { border-radius: .65rem; }
+}
