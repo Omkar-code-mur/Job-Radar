@@ -1,6 +1,13 @@
 using JobRadar.Api.Sources.Greenhouse;
+using JobRadar.Api.Sources.Deloitte;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Logging.AddSimpleConsole(options =>
+{
+    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss ";
+    options.SingleLine = true;
+});
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
@@ -19,6 +26,58 @@ await store.InitializeAsync();
 
 var app = builder.Build();
 app.UseCors();
+
+app.Use(async (context, next) =>
+{
+    var requestId = context.Request.Headers["X-Request-ID"].FirstOrDefault()
+        ?? context.TraceIdentifier;
+    context.Response.Headers["X-Request-ID"] = requestId;
+
+    using (app.Logger.BeginScope(new Dictionary<string, object>
+    {
+        ["RequestId"] = requestId,
+        ["Method"] = context.Request.Method,
+        ["Path"] = context.Request.Path.Value ?? string.Empty,
+    }))
+    {
+        var stopwatch = Stopwatch.StartNew();
+        app.Logger.LogInformation("API request started {Method} {Path}", context.Request.Method, context.Request.Path);
+        try
+        {
+            await next(context);
+            app.Logger.LogInformation(
+                "API request completed {Method} {Path} with {StatusCode} in {ElapsedMs} ms",
+                context.Request.Method,
+                context.Request.Path,
+                context.Response.StatusCode,
+                stopwatch.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            app.Logger.LogWarning(
+                "API request cancelled {Method} {Path} after {ElapsedMs} ms",
+                context.Request.Method,
+                context.Request.Path,
+                stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            app.Logger.LogError(
+                exception,
+                "API request failed {Method} {Path} after {ElapsedMs} ms",
+                context.Request.Method,
+                context.Request.Path,
+                stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+    }
+});
+builder.Services.AddHttpClient<DeloitteUsiJobSource>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; JobRadar/1.0; public-job-monitor)");
+});
 
 app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/dashboard", async (CancellationToken ct) => Results.Ok(await store.DashboardAsync(ct)));
@@ -53,8 +112,8 @@ app.MapPatch("/api/sources/{id}", async (string id, SourceUpdate input, Cancella
 });
 app.MapDelete("/api/sources/{id}", async (string id, CancellationToken ct) =>
     await store.DeleteSourceAsync(id, ct) ? Results.NoContent() : Results.NotFound(new { error = "Source not found." }));
-app.MapPost("/api/sources/{id}/scan", async (string id, GreenhouseJobSource greenhouse, CancellationToken ct) =>
-    Results.Ok(await store.ScanAsync([id], greenhouse, ct)));
+app.MapPost("/api/sources/{id}/scan", async (string id, GreenhouseJobSource greenhouse, DeloitteUsiJobSource deloitteUsi, CancellationToken ct) =>
+    Results.Ok(await store.ScanAsync([id], greenhouse, deloitteUsi, ct)));
 
 app.MapGet("/api/jobs", async (string? search, string? status, string? location, string? workplaceType, CancellationToken ct) =>
     Results.Ok(await store.GetJobsAsync(search, status, location, workplaceType, ct)));
@@ -75,8 +134,8 @@ app.MapPut("/api/matching", async (MatchingConfiguration input, CancellationToke
     return Results.Ok(input);
 });
 app.MapGet("/api/notifications", async (CancellationToken ct) => Results.Ok(await store.GetNotificationsAsync(ct)));
-app.MapPost("/api/scheduler/scan", async (GreenhouseJobSource greenhouse, CancellationToken ct) =>
-    Results.Ok(await store.ScanAsync((await store.GetSourcesAsync(ct)).Select(source => source.Id).ToArray(), greenhouse, ct)));
+app.MapPost("/api/scheduler/scan", async (GreenhouseJobSource greenhouse, DeloitteUsiJobSource deloitteUsi, CancellationToken ct) =>
+    Results.Ok(await store.ScanAsync((await store.GetSourcesAsync(ct)).Select(source => source.Id).ToArray(), greenhouse, deloitteUsi, ct)));
 
 app.Run();
 

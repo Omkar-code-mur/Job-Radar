@@ -10,6 +10,7 @@ export type AuthTokenGetter = () => Promise<string | null> | string | null;
 
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
+const REQUEST_ID_HEADER = "x-request-id";
 
 // ---------------------------------------------------------------------------
 // Module-level configuration
@@ -146,6 +147,25 @@ function getStringField(value: unknown, key: string): string | undefined {
 
 function truncate(text: string, maxLength = 300): string {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function createRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function logApiEvent(
+  event: string,
+  details: Record<string, unknown>,
+  level: "info" | "error" = "info",
+): void {
+  // Do not add request bodies, tokens, or authorization headers here.
+  const message = `[JobRadar API] ${event}`;
+  if (level === "error") console.error(message, details);
+  else console.info(message, details);
 }
 
 function buildErrorMessage(response: Response, data: unknown): string {
@@ -349,6 +369,9 @@ export async function customFetch<T = unknown>(
     headers.set("accept", DEFAULT_JSON_ACCEPT);
   }
 
+  const requestId = headers.get(REQUEST_ID_HEADER) ?? createRequestId();
+  headers.set(REQUEST_ID_HEADER, requestId);
+
   // Attach bearer token when an auth getter is configured and no
   // Authorization header has been explicitly provided.
   if (_authTokenGetter && !headers.has("authorization")) {
@@ -359,13 +382,40 @@ export async function customFetch<T = unknown>(
   }
 
   const requestInfo = { method, url: resolveUrl(input) };
+  const startedAt = Date.now();
+  logApiEvent("request started", { requestId, method, url: requestInfo.url });
 
-  const response = await fetch(input, { ...init, method, headers });
+  try {
+    const response = await fetch(input, { ...init, method, headers });
 
-  if (!response.ok) {
-    const errorData = await parseErrorBody(response, method);
-    throw new ApiError(response, errorData, requestInfo);
+    if (!response.ok) {
+      const errorData = await parseErrorBody(response, method);
+      throw new ApiError(response, errorData, requestInfo);
+    }
+
+    const data = (await parseSuccessBody(response, responseType, requestInfo)) as T;
+    logApiEvent("request completed", {
+      requestId,
+      method,
+      url: requestInfo.url,
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+    });
+    return data;
+  } catch (error) {
+    const apiError = error instanceof ApiError ? error : undefined;
+    logApiEvent(
+      "request failed",
+      {
+        requestId,
+        method,
+        url: requestInfo.url,
+        status: apiError?.status,
+        durationMs: Date.now() - startedAt,
+        error,
+      },
+      "error",
+    );
+    throw error;
   }
-
-  return (await parseSuccessBody(response, responseType, requestInfo)) as T;
 }

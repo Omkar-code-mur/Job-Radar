@@ -123,7 +123,39 @@ function CompanyModal({ company, close }: { company?: any; close: () => void }) 
   const [name, setName] = useState(company?.name || '');
   const [domain, setDomain] = useState(company?.domain || '');
   const qc = useQueryClient(); const create = useCreateCompany(); const update = useUpdateCompany();
-  const submit = (e: React.FormEvent) => { e.preventDefault(); const done = () => { qc.invalidateQueries({ queryKey: getListCompaniesQueryKey() }); close(); }; company ? update.mutate({ id: company.id, data: { name, domain } }, { onSuccess: done }) : create.mutate({ data: { name, domain } }, { onSuccess: done }); };
+  const submit = (e: React.FormEvent) => {
+  e.preventDefault();
+
+  console.log("ADD COMPANY SUBMIT FIRED");
+
+  const done = () => {
+    console.log("ADD COMPANY SUCCESS");
+    qc.invalidateQueries({ queryKey: getListCompaniesQueryKey() });
+    close();
+  };
+
+  if (company) {
+    update.mutate(
+      { id: company.id, data: { name, domain } },
+      {
+        onSuccess: done,
+        onError: (error) => {
+          console.error("UPDATE COMPANY ERROR:", error);
+        },
+      }
+    );
+  } else {
+    create.mutate(
+      { data: { name, domain } },
+      {
+        onSuccess: done,
+        onError: (error) => {
+          console.error("CREATE COMPANY ERROR:", error);
+        },
+      }
+    );
+  }
+};
   return <Modal title={company ? 'Edit company' : 'Add company'} close={close}><form className="space-y-4" onSubmit={submit}><div><label className="label" htmlFor="company-name">Company name</label><input id="company-name" className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Linear" required data-testid="input-company-name" /></div><div><label className="label" htmlFor="company-domain">Career domain</label><input id="company-domain" className="field" value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="linear.app" required data-testid="input-company-domain" /></div><div className="flex justify-end gap-2 pt-2"><button type="button" className="btn btn-ghost" onClick={close} data-testid="button-cancel-company">Cancel</button><button className="btn btn-primary" disabled={create.isPending || update.isPending} data-testid="button-save-company">{create.isPending || update.isPending ? 'Saving…' : company ? 'Save changes' : 'Add company'}</button></div></form></Modal>;
 }
 function Companies() {
@@ -140,7 +172,7 @@ function SourceModal({ source, companies, close }: { source?: any; companies: an
   const qc = useQueryClient(); const create = useCreateSource(); const update = useUpdateSource();
   const submit = (e: React.FormEvent) => { e.preventDefault(); const done = () => { qc.invalidateQueries({ queryKey: getListSourcesQueryKey() }); qc.invalidateQueries({ queryKey: getListCompaniesQueryKey() }); close(); }; source ? update.mutate({ id: source.id, data: { name, url } }, { onSuccess: done }) : create.mutate({ data: { companyId, name, type, url } }, { onSuccess: done }); };
   if (!source && !companies.length) return <Modal title="Add source" close={close}><div className="space-y-4"><p className="text-sm text-muted-foreground">A source belongs to a company. Add a company first, then return here to connect its career page or public job API.</p><div className="flex justify-end gap-2"><button type="button" className="btn btn-ghost" onClick={close} data-testid="button-cancel-source">Cancel</button><Link href="/companies" className="btn btn-primary" onClick={close} data-testid="link-add-company-first"><Plus size={15} />Add company first</Link></div></div></Modal>;
-  return <Modal title={source ? 'Edit source' : 'Add source'} close={close}><form className="space-y-4" onSubmit={submit}>{!source && <div><label className="label" htmlFor="source-company">Company</label><select id="source-company" className="field" value={companyId} onChange={(e) => setCompanyId(e.target.value)} required data-testid="select-source-company">{companies.map((c) => <option value={c.id} key={c.id}>{c.name}</option>)}</select></div>}<div><label className="label" htmlFor="source-name">Source name</label><input id="source-name" className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Main careers page" required data-testid="input-source-name" /></div>{!source && <div><label className="label" htmlFor="source-type">Connector</label><select id="source-type" className="field" value={type} onChange={(e) => setType(e.target.value)} data-testid="select-source-type"><option value="GREENHOUSE_API">Greenhouse API</option><option value="LEVER_API">Lever API</option><option value="STRUCTURED_HTML">Structured HTML</option><option value="GENERIC_HTML">Generic HTML</option></select></div>}<div><label className="label" htmlFor="source-url">Source URL</label><input id="source-url" type="url" className="field" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" required data-testid="input-source-url" /></div><div className="flex justify-end gap-2 pt-2"><button type="button" className="btn btn-ghost" onClick={close} data-testid="button-cancel-source">Cancel</button><button className="btn btn-primary" disabled={create.isPending || update.isPending} data-testid="button-save-source">{create.isPending || update.isPending ? 'Saving…' : source ? 'Save changes' : 'Add source'}</button></div></form></Modal>;
+  return <Modal title={source ? 'Edit source' : 'Add source'} close={close}><form className="space-y-4" onSubmit={submit}>{!source && <div><label className="label" htmlFor="source-company">Company</label><select id="source-company" className="field" value={companyId} onChange={(e) => setCompanyId(e.target.value)} required data-testid="select-source-company">{companies.map((c) => <option value={c.id} key={c.id}>{c.name}</option>)}</select></div>}<div><label className="label" htmlFor="source-name">Source name</label><input id="source-name" className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Main careers page" required data-testid="input-source-name" /></div>{!source && <div><label className="label" htmlFor="source-type">Connector</label><select id="source-type" className="field" value={type} onChange={(e) => { const next = e.target.value; setType(next); if (next === 'DELOITTE_USI') setUrl('https://usijobs.deloitte.com/careersUSI/SearchJobs'); }} data-testid="select-source-type"><option value="GREENHOUSE_API">Greenhouse API</option><option value="DELOITTE_USI">Deloitte USI careers</option><option value="LEVER_API">Lever API</option><option value="STRUCTURED_HTML">Structured HTML</option><option value="GENERIC_HTML">Generic HTML</option></select></div>}<div><label className="label" htmlFor="source-url">Source URL</label><input id="source-url" type="url" className="field" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" required data-testid="input-source-url" /></div>{type === 'DELOITTE_USI' && <p className="text-xs text-muted-foreground">Uses Deloitte USI’s official public job search and creates direct “Apply” links for every role.</p>}<div className="flex justify-end gap-2 pt-2"><button type="button" className="btn btn-ghost" onClick={close} data-testid="button-cancel-source">Cancel</button><button className="btn btn-primary" disabled={create.isPending || update.isPending} data-testid="button-save-source">{create.isPending || update.isPending ? 'Saving…' : source ? 'Save changes' : 'Add source'}</button></div></form></Modal>;
 }
 function SourceCard({ source, onEdit }: { source: any; onEdit: () => void }) {
   const qc = useQueryClient(); const scan = useScanSource(); const del = useDeleteSource(); const update = useUpdateSource();

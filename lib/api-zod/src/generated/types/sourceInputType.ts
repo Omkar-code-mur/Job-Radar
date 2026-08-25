@@ -11,6 +11,7 @@ export type SourceInputType = typeof SourceInputType[keyof typeof SourceInputTyp
 
 export const SourceInputType = {
   GREENHOUSE_API: 'GREENHOUSE_API',
+  DELOITTE_USI: 'DELOITTE_USI',
   LEVER_API: 'LEVER_API',
   STRUCTURED_HTML: 'STRUCTURED_HTML',
   GENERIC_HTML: 'GENERIC_HTML',

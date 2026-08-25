@@ -371,7 +371,7 @@ components:
         companyId: { type: string }
         companyName: { type: string }
         name: { type: string }
-        type: { type: string, enum: [GREENHOUSE_API, LEVER_API, STRUCTURED_HTML, GENERIC_HTML] }
+        type: { type: string, enum: [GREENHOUSE_API, DELOITTE_USI, LEVER_API, STRUCTURED_HTML, GENERIC_HTML] }
         url: { type: string }
         enabled: { type: boolean }
         status: { type: string, enum: [healthy, warning, failed, never_run] }
@@ -385,7 +385,7 @@ components:
       properties:
         companyId: { type: string }
         name: { type: string }
-        type: { type: string, enum: [GREENHOUSE_API, LEVER_API, STRUCTURED_HTML, GENERIC_HTML] }
+        type: { type: string, enum: [GREENHOUSE_API, DELOITTE_USI, LEVER_API, STRUCTURED_HTML, GENERIC_HTML] }
         url: { type: string }
     SourceUpdate:
       type: object
