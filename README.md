@@ -34,6 +34,17 @@ The backend project is in `artifacts/api-server-dotnet`. It currently uses an in
 development store to preserve the existing UI behavior while the PostgreSQL repository is
 implemented.
 
+The API uses Supabase PostgreSQL. For local credentials, initialize .NET User Secrets once
+and store the connection string outside the repository:
+
+```powershell
+dotnet user-secrets init --project artifacts/api-server-dotnet/JobRadar.Api.csproj
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=YOUR_HOST;Port=5432;Database=postgres;Username=YOUR_USER;Password=YOUR_PASSWORD;SSL Mode=Require" --project artifacts/api-server-dotnet/JobRadar.Api.csproj
+```
+
+On startup, the API creates the required tables and indexes if they do not exist. The local
+development settings file is ignored by Git and must never contain a committed password.
+
 Useful checks:
 
 ```bash

@@ -1,0 +1,19 @@
+{
+  "jobs": [
+    {
+      "id": 1001,
+      "title": "Full Stack Engineer",
+      "content": "<p>Build <strong>React</strong> and .NET services.</p>",
+      "absolute_url": "https://boards.greenhouse.io/example/jobs/1001",
+      "updated_at": "2026-08-25T08:00:00Z",
+      "location": { "name": "Remote - India" },
+      "departments": [{ "name": "Engineering" }],
+      "offices": []
+    },
+    {
+      "id": 0,
+      "title": "Invalid job",
+      "absolute_url": ""
+    }
+  ]
+}
