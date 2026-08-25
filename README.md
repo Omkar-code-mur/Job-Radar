@@ -23,17 +23,22 @@ Prerequisites: Node.js 22+ and npm 10+.
 
 ```bash
 npm install
-npm run dev --workspace=@workspace/api-server
+dotnet run --project artifacts/api-server-dotnet/JobRadar.Api.csproj
 npm run dev --workspace=@workspace/job-radar
 ```
 
-The API is served at `/api`; the Job Radar web app is served at `/`.
+The ASP.NET Core API runs at `http://localhost:5000/api`; the Job Radar web app runs at
+`http://localhost:5173` and proxies `/api` requests to the backend.
+
+The backend project is in `artifacts/api-server-dotnet`. It currently uses an in-memory
+development store to preserve the existing UI behavior while the PostgreSQL repository is
+implemented.
 
 Useful checks:
 
 ```bash
 npm run typecheck
-npm run typecheck --workspace=@workspace/api-server
+npm run typecheck --workspace=@workspace/job-radar
 npm run typecheck --workspace=@workspace/job-radar
 ```
 

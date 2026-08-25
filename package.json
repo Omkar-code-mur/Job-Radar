@@ -3,7 +3,6 @@
   "version": "0.0.0",
   "license": "MIT",
   "workspaces": [
-    "artifacts/api-server",
     "artifacts/job-radar",
     "lib/api-client-react",
     "lib/api-zod",

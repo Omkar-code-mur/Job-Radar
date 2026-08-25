@@ -33,6 +33,9 @@ export default defineConfig({
     port,
     strictPort: true,
     host: '0.0.0.0',
+    proxy: {
+      '/api': 'http://localhost:5000',
+    },
     allowedHosts: true,
     fs: {
       strict: true,
