@@ -1,6 +1,6 @@
-# [Project name]
+# Job Radar
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Personal job monitoring for public career sources, with transparent rule-based matching and notification history.
 
 ## Run & Operate
 
@@ -22,15 +22,22 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/job-radar` — React/Vite web app and all user-facing routes
+- `artifacts/api-server/src/routes/job-radar.ts` — REST handlers
+- `artifacts/api-server/src/lib/job-radar-store.ts` — seeded development data and storage boundary
+- `artifacts/api-server/src/domain/matching.ts` — `IMatchingEngine` and V1 `RuleBasedMatcher`
+- `lib/api-spec/openapi.yaml` — API contract source of truth
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- V1 matching is deterministic and explainable; no AI or embeddings are used.
+- Source management uses a common source shape so Greenhouse, Lever, structured HTML, and generic HTML adapters can be added independently.
+- The matcher is accessed through `IMatchingEngine`, leaving room for AI or hybrid implementations later.
+- Development seed data keeps the preview useful without requiring provider credentials.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+The app monitors public job sources, normalizes roles into a shared job model, scores them against candidate preferences, and shows recent opportunities, source health, and notification history.
 
 ## User preferences
 
@@ -38,7 +45,9 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Run `pnpm --filter @workspace/api-spec run codegen` after changing the OpenAPI contract.
+- The API and frontend are separate managed services; restart both after changing service configuration.
+- Development data is currently in memory and resets when the API process restarts.
 
 ## Pointers
 

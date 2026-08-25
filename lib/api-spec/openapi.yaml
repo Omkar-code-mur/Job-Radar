@@ -1,22 +1,27 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Job Radar REST API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
-    description: Health operations
+  - name: dashboard
+  - name: companies
+  - name: sources
+  - name: jobs
+  - name: profile
+  - name: matching
+  - name: notifications
+  - name: scheduler
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +29,479 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Get dashboard overview
+      responses:
+        "200":
+          description: Dashboard overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dashboard"
+  /companies:
+    get:
+      operationId: listCompanies
+      tags: [companies]
+      summary: List monitored companies
+      responses:
+        "200":
+          description: Companies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Company"
+    post:
+      operationId: createCompany
+      tags: [companies]
+      summary: Create a company
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyInput"
+      responses:
+        "201":
+          description: Created company
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+  /companies/{id}:
+    patch:
+      operationId: updateCompany
+      tags: [companies]
+      summary: Update a company
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyUpdate"
+      responses:
+        "200":
+          description: Updated company
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+    delete:
+      operationId: deleteCompany
+      tags: [companies]
+      summary: Delete a company
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: Deleted
+  /sources:
+    get:
+      operationId: listSources
+      tags: [sources]
+      summary: List monitored sources
+      responses:
+        "200":
+          description: Sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JobSource"
+    post:
+      operationId: createSource
+      tags: [sources]
+      summary: Add a job source
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceInput"
+      responses:
+        "201":
+          description: Created source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobSource"
+  /sources/{id}:
+    patch:
+      operationId: updateSource
+      tags: [sources]
+      summary: Update a source
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceUpdate"
+      responses:
+        "200":
+          description: Updated source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobSource"
+    delete:
+      operationId: deleteSource
+      tags: [sources]
+      summary: Delete a source
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: Deleted
+  /sources/{id}/scan:
+    post:
+      operationId: scanSource
+      tags: [scheduler]
+      summary: Manually scan a source
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Scan result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanResult"
+  /jobs:
+    get:
+      operationId: listJobs
+      tags: [jobs]
+      summary: Search discovered jobs
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [all, matched, notified, new] }
+        - name: location
+          in: query
+          schema: { type: string }
+        - name: workplaceType
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Job"
+  /jobs/{id}:
+    get:
+      operationId: getJob
+      tags: [jobs]
+      summary: Get job details
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Job detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+  /profile:
+    get:
+      operationId: getProfile
+      tags: [profile]
+      summary: Get candidate profile
+      responses:
+        "200":
+          description: Candidate profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CandidateProfile"
+    put:
+      operationId: updateProfile
+      tags: [profile]
+      summary: Update candidate profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileInput"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CandidateProfile"
+  /matching:
+    get:
+      operationId: getMatchingConfiguration
+      tags: [matching]
+      summary: Get matching configuration
+      responses:
+        "200":
+          description: Matching configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingConfiguration"
+    put:
+      operationId: updateMatchingConfiguration
+      tags: [matching]
+      summary: Update matching configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchingInput"
+      responses:
+        "200":
+          description: Updated configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingConfiguration"
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: List notification history
+      responses:
+        "200":
+          description: Notification history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+  /scheduler/scan:
+    post:
+      operationId: runSchedulerScan
+      tags: [scheduler]
+      summary: Scan all enabled sources
+      responses:
+        "200":
+          description: Scan result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanResult"
 components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
-        status:
-          type: string
-      required:
-        - status
-
+        status: { type: string }
+    Dashboard:
+      type: object
+      required: [stats, recentMatches, sourceHealth]
+      properties:
+        stats:
+          $ref: "#/components/schemas/DashboardStats"
+        recentMatches:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+        sourceHealth:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobSource"
+    DashboardStats:
+      type: object
+      required: [companies, activeSources, jobs, newJobs, matchedJobs, notifiedJobs, failedSources]
+      properties:
+        companies: { type: integer }
+        activeSources: { type: integer }
+        jobs: { type: integer }
+        newJobs: { type: integer }
+        matchedJobs: { type: integer }
+        notifiedJobs: { type: integer }
+        failedSources: { type: integer }
+    Company:
+      type: object
+      required: [id, name, domain, initials, color, enabled, sourceCount, jobCount]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        domain: { type: string }
+        initials: { type: string }
+        color: { type: string }
+        enabled: { type: boolean }
+        sourceCount: { type: integer }
+        jobCount: { type: integer }
+        createdAt: { type: string }
+    CompanyInput:
+      type: object
+      required: [name, domain]
+      properties:
+        name: { type: string, minLength: 1 }
+        domain: { type: string, minLength: 1 }
+    CompanyUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        domain: { type: string }
+        enabled: { type: boolean }
+    JobSource:
+      type: object
+      required: [id, companyId, companyName, name, type, url, enabled, status, lastFetch, jobsFetched, failureCount]
+      properties:
+        id: { type: string }
+        companyId: { type: string }
+        companyName: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [GREENHOUSE_API, LEVER_API, STRUCTURED_HTML, GENERIC_HTML] }
+        url: { type: string }
+        enabled: { type: boolean }
+        status: { type: string, enum: [healthy, warning, failed, never_run] }
+        lastFetch: { type: string }
+        jobsFetched: { type: integer }
+        failureCount: { type: integer }
+        lastError: { type: ["string", "null"] }
+    SourceInput:
+      type: object
+      required: [companyId, name, type, url]
+      properties:
+        companyId: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [GREENHOUSE_API, LEVER_API, STRUCTURED_HTML, GENERIC_HTML] }
+        url: { type: string }
+    SourceUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        url: { type: string }
+        enabled: { type: boolean }
+    Job:
+      type: object
+      required: [id, companyId, sourceId, company, title, description, location, workplaceType, department, employmentType, postedDate, firstSeenAt, applicationUrl, sourceUrl, score, isMatch, notified, matchedSkills, missingSkills, breakdown]
+      properties:
+        id: { type: string }
+        companyId: { type: string }
+        sourceId: { type: string }
+        company: { type: string }
+        title: { type: string }
+        description: { type: string }
+        location: { type: string }
+        workplaceType: { type: string, enum: [Remote, Hybrid, "On-site", Unknown] }
+        department: { type: string }
+        employmentType: { type: string }
+        postedDate: { type: string }
+        firstSeenAt: { type: string }
+        applicationUrl: { type: string }
+        sourceUrl: { type: string }
+        score: { type: integer }
+        isMatch: { type: boolean }
+        notified: { type: boolean }
+        matchedSkills:
+          type: array
+          items: { type: string }
+        missingSkills:
+          type: array
+          items: { type: string }
+        breakdown:
+          $ref: "#/components/schemas/ScoreBreakdown"
+    ScoreBreakdown:
+      type: object
+      required: [role, skills, experience, location, aiRelevance, freshness]
+      properties:
+        role: { type: integer }
+        skills: { type: integer }
+        experience: { type: integer }
+        location: { type: integer }
+        aiRelevance: { type: integer }
+        freshness: { type: integer }
+    CandidateProfile:
+      type: object
+      required: [id, roles, skills, technologies, minYears, maxYears, locations, workplacePreference, includeKeywords, excludeKeywords, email]
+      properties:
+        id: { type: string }
+        roles: { type: array, items: { type: string } }
+        skills: { type: array, items: { type: string } }
+        technologies: { type: array, items: { type: string } }
+        minYears: { type: integer }
+        maxYears: { type: integer }
+        locations: { type: array, items: { type: string } }
+        workplacePreference: { type: string, enum: [Remote, Hybrid, "On-site", Any] }
+        includeKeywords: { type: array, items: { type: string } }
+        excludeKeywords: { type: array, items: { type: string } }
+        email: { type: string }
+    ProfileInput:
+      type: object
+      required: [roles, skills, technologies, minYears, maxYears, locations, workplacePreference, includeKeywords, excludeKeywords, email]
+      properties:
+        roles: { type: array, items: { type: string } }
+        skills: { type: array, items: { type: string } }
+        technologies: { type: array, items: { type: string } }
+        minYears: { type: integer, minimum: 0 }
+        maxYears: { type: integer, minimum: 0 }
+        locations: { type: array, items: { type: string } }
+        workplacePreference: { type: string, enum: [Remote, Hybrid, "On-site", Any] }
+        includeKeywords: { type: array, items: { type: string } }
+        excludeKeywords: { type: array, items: { type: string } }
+        email: { type: string }
+    MatchingConfiguration:
+      type: object
+      required: [threshold, roleWeight, skillsWeight, experienceWeight, locationWeight, aiWeight, freshnessWeight]
+      properties:
+        threshold: { type: integer, minimum: 0, maximum: 100 }
+        roleWeight: { type: integer }
+        skillsWeight: { type: integer }
+        experienceWeight: { type: integer }
+        locationWeight: { type: integer }
+        aiWeight: { type: integer }
+        freshnessWeight: { type: integer }
+    MatchingInput:
+      type: object
+      required: [threshold, roleWeight, skillsWeight, experienceWeight, locationWeight, aiWeight, freshnessWeight]
+      properties:
+        threshold: { type: integer, minimum: 0, maximum: 100 }
+        roleWeight: { type: integer, minimum: 0 }
+        skillsWeight: { type: integer, minimum: 0 }
+        experienceWeight: { type: integer, minimum: 0 }
+        locationWeight: { type: integer, minimum: 0 }
+        aiWeight: { type: integer, minimum: 0 }
+        freshnessWeight: { type: integer, minimum: 0 }
+    Notification:
+      type: object
+      required: [id, jobId, jobTitle, company, score, type, sentAt, status]
+      properties:
+        id: { type: string }
+        jobId: { type: string }
+        jobTitle: { type: string }
+        company: { type: string }
+        score: { type: integer }
+        type: { type: string }
+        sentAt: { type: string }
+        status: { type: string, enum: [sent, failed, pending] }
+        error: { type: ["string", "null"] }
+    ScanResult:
+      type: object
+      required: [sourcesScanned, jobsFetched, newJobs, matchedJobs, notificationsSent]
+      properties:
+        sourcesScanned: { type: integer }
+        jobsFetched: { type: integer }
+        newJobs: { type: integer }
+        matchedJobs: { type: integer }
+        notificationsSent: { type: integer }

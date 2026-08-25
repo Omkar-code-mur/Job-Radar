@@ -1,0 +1,1 @@
+- [OpenAPI Zod compatibility](openapi-zod-compatibility.md) — current generated schemas require the workspace Zod 4 API.

@@ -1,0 +1,1154 @@
+# Build Job Radar — V1
+
+Build a full-stack web application called **Job Radar**.
+
+## 1. Product Goal
+
+Job Radar is a personal job-monitoring platform that automatically monitors **manually configured company career pages and public job APIs**, discovers newly posted jobs, evaluates them against a user-defined job profile using a **transparent rule-based matching engine**, and sends an email notification when a new job meets the configured match threshold.
+
+### Critical V1 requirement
+
+**V1 must NOT use AI/LLMs/embeddings.**
+
+However, the application architecture must be deliberately designed so that an AI-based matching engine can be added later **without restructuring the rest of the application**.
+
+The core architecture should therefore separate:
+
+```text
+Job Sources
+    ↓
+Fetching
+    ↓
+Normalization
+    ↓
+Persistence
+    ↓
+Filtering
+    ↓
+Matching Engine
+    ↓
+Notification
+```
+
+The matching layer must be accessed through a clean abstraction such as:
+
+```text
+IMatchingEngine
+```
+
+with the V1 implementation:
+
+```text
+RuleBasedMatcher
+```
+
+Later, an implementation such as:
+
+```text
+AIJobMatcher
+```
+
+should be able to replace `RuleBasedMatcher` without requiring changes to job fetching, database, dashboard, notification, or source management code.
+
+---
+
+# 2. Technology
+
+Use a modern, maintainable full-stack TypeScript architecture unless there is a strong technical reason to choose otherwise.
+
+Preferred stack:
+
+* **Frontend:** React + TypeScript
+* **Backend:** Node.js + TypeScript
+* **API:** REST
+* **Database:** PostgreSQL
+* **ORM:** Prisma or another well-supported TypeScript ORM
+* **Styling:** modern responsive component-based UI
+* **Validation:** Zod or equivalent
+* **Email:** provider abstraction with a simple SMTP-compatible implementation for V1
+* **Scheduler:** background scheduled process running approximately every hour
+* **Testing:** unit tests for matching and source normalization
+
+Keep the architecture modular.
+
+Do NOT introduce microservices, Kubernetes, message queues, or other infrastructure unless genuinely necessary for V1.
+
+The goal is a reliable modular monolith that can later be split if required.
+
+---
+
+# 3. Application Architecture
+
+Use clear separation between:
+
+```text
+Frontend
+    ↓
+REST API
+    ↓
+Application Services
+    ↓
+Domain / Matching
+    ↓
+Repositories
+    ↓
+PostgreSQL
+```
+
+Job ingestion should be separated into source adapters:
+
+```text
+JobSource
+├── GreenhouseSource
+├── LeverSource
+├── StructuredCareerPageSource
+└── GenericHttpHtmlSource
+```
+
+The system should not assume every website can be scraped.
+
+Only support publicly accessible sources where automated access is permitted.
+
+Do NOT:
+
+* bypass authentication
+* bypass CAPTCHAs
+* bypass anti-bot systems
+* access private APIs
+* reverse engineer private/internal APIs
+* evade robots/access restrictions
+
+If a source cannot be safely or reliably accessed, mark it as unsupported/failed and show the reason in the source status.
+
+---
+
+# 4. Company and Source Management
+
+Users must be able to add, edit, enable/disable, and delete monitored companies.
+
+Each company can have one or more job sources.
+
+Example:
+
+```text
+Company
+    ├── Greenhouse API
+    ├── Career Page
+    └── Other public source
+```
+
+Each source should contain:
+
+* company
+* source name
+* source type
+* URL
+* enabled/disabled status
+* configuration
+* last successful fetch
+* last attempted fetch
+* jobs fetched
+* failure count
+* last error
+* created timestamp
+* updated timestamp
+
+Supported source types:
+
+```text
+GREENHOUSE_API
+LEVER_API
+STRUCTURED_HTML
+GENERIC_HTML
+```
+
+Design the source system so additional source adapters can be added later without changing the rest of the application.
+
+---
+
+# 5. Job Source Fetching
+
+Create a common interface such as:
+
+```text
+IJobSource
+```
+
+Example responsibility:
+
+```text
+fetchJobs(source): Promise<RawJob[]>
+```
+
+Each adapter converts its source-specific response into a common internal representation.
+
+Implement initial adapters where practical:
+
+### Greenhouse
+
+Support the documented public Greenhouse job API where applicable.
+
+### Lever
+
+Support the documented public Lever job API where applicable.
+
+### Structured HTML
+
+Support predictable career pages where job information can be extracted from structured HTML.
+
+### Generic HTML
+
+Create a safe generic adapter with configurable selectors where practical.
+
+If generic scraping cannot reliably determine fields, do not fabricate data.
+
+---
+
+# 6. Common Job Model
+
+Normalize all discovered jobs into one common model.
+
+At minimum store:
+
+```text
+id
+companyId
+sourceId
+externalJobId
+title
+description
+location
+workplaceType
+department
+employmentType
+postedDate
+applicationUrl
+sourceUrl
+firstSeenAt
+lastSeenAt
+createdAt
+updatedAt
+rawMetadata
+```
+
+Additional metadata can be stored as JSON where appropriate.
+
+The uniqueness rule must prevent duplicate jobs using:
+
+```text
+company + source + externalJobId
+```
+
+Do not create duplicate database records when the same job is encountered during later fetches.
+
+Track whether a job is:
+
+* newly discovered
+* previously discovered
+* matched
+* notified
+* failed to process
+
+---
+
+# 7. Scheduler
+
+Implement a scheduled background process that runs approximately **once per hour**.
+
+The scheduler should:
+
+1. Find enabled sources.
+2. Fetch jobs.
+3. Normalize jobs.
+4. Upsert jobs into the database.
+5. Identify newly discovered jobs.
+6. Run the matching engine against relevant new jobs.
+7. Store match results.
+8. Send notifications for jobs above the configured threshold.
+9. Record notification history.
+10. Record source success/failure information.
+
+Make the scheduler runnable locally.
+
+Provide clear README instructions such as:
+
+```text
+npm run scheduler
+```
+
+or the equivalent for the selected architecture.
+
+Also provide a way to manually trigger a source/job scan from the UI for development/testing.
+
+Do not require the scheduler to run continuously during development if a manual trigger is available.
+
+---
+
+# 8. Candidate Profile
+
+Create a profile/settings page where the user can configure:
+
+### Roles
+
+Examples:
+
+```text
+Full Stack Developer
+Software Engineer
+AI Engineer
+Backend Developer
+Frontend Developer
+```
+
+### Skills
+
+Examples:
+
+```text
+React
+.NET
+C#
+TypeScript
+Azure
+SQL
+Semantic Kernel
+Azure OpenAI
+```
+
+### Technologies
+
+Separate technologies from general skills where useful.
+
+### Experience
+
+Allow:
+
+* minimum years
+* maximum years
+
+### Preferred locations
+
+Examples:
+
+```text
+Pune
+Mumbai
+Bangalore
+Remote
+```
+
+### Workplace preference
+
+Support:
+
+```text
+Remote
+Hybrid
+On-site
+Any
+```
+
+### Keywords
+
+Include keywords.
+
+Exclude keywords.
+
+### Minimum match score
+
+Example:
+
+```text
+70 / 100
+```
+
+All of these settings must be persisted in the database.
+
+---
+
+# 9. Rule-Based Matching Engine
+
+Create a clean interface:
+
+```text
+IMatchingEngine
+```
+
+V1 implementation:
+
+```text
+RuleBasedMatcher
+```
+
+The rest of the application must depend on the interface rather than directly depending on `RuleBasedMatcher`.
+
+The matcher should return a structured result such as:
+
+```text
+MatchResult
+
+score
+matchedCriteria[]
+missingCriteria[]
+reasons[]
+breakdown
+isMatch
+```
+
+Example:
+
+```text
+Overall score: 86
+
+Role relevance:       25/30
+Skills:               27/30
+Experience:            15/15
+Location:              8/10
+AI relevance:          7/10
+Freshness:              1/5
+```
+
+Use transparent deterministic rules.
+
+---
+
+# 10. V1 Matching Rules
+
+Implement scoring for:
+
+### A. Role/title relevance
+
+Compare the job title against preferred roles.
+
+Example:
+
+```text
+"Full Stack Software Engineer"
+```
+
+should match:
+
+```text
+"Full Stack Developer"
+"Software Engineer"
+```
+
+Use configurable keyword/phrase matching rather than AI semantic understanding.
+
+### B. Skill matching
+
+Compare configured skills/technologies against:
+
+* title
+* description
+* requirements
+* responsibilities
+* other available job metadata
+
+Calculate matched skills and missing skills where detectable.
+
+### C. Experience compatibility
+
+Attempt to detect phrases such as:
+
+```text
+2+ years
+2-4 years
+3 years required
+minimum 2 years
+```
+
+Compare with the configured candidate experience.
+
+If experience cannot be detected, do not assume a mismatch.
+
+### D. Location compatibility
+
+Compare job locations against preferred locations.
+
+Handle:
+
+* Remote
+* Hybrid
+* On-site
+* multiple locations
+
+### E. AI/GenAI relevance keywords
+
+V1 should use only explicit keywords.
+
+Examples:
+
+```text
+AI
+GenAI
+Generative AI
+LLM
+Azure OpenAI
+OpenAI
+Semantic Kernel
+RAG
+Agentic AI
+Machine Learning
+```
+
+Do NOT use an AI model to determine relevance in V1.
+
+### F. Freshness
+
+Prefer recently posted jobs.
+
+Make the freshness contribution configurable.
+
+---
+
+# 11. Configurable Scoring
+
+Do not hardcode all scoring weights.
+
+Create configurable matching settings.
+
+For example:
+
+```text
+Role relevance       30%
+Skills               30%
+Experience            15%
+Location              10%
+AI relevance          10%
+Freshness              5%
+```
+
+Total:
+
+```text
+100%
+```
+
+Allow weights and threshold to be modified through the settings UI.
+
+The backend must validate that scoring configuration is valid.
+
+---
+
+# 12. Notification System
+
+Create a notification service abstraction:
+
+```text
+INotificationService
+```
+
+V1 implementation:
+
+```text
+EmailNotificationService
+```
+
+When a newly discovered job exceeds the configured minimum score, send an email.
+
+The email should contain:
+
+* Job title
+* Company
+* Location
+* Workplace type
+* Experience requirement if detected
+* Match score
+* Score breakdown
+* Matched skills/criteria
+* Missing skills if detectable
+* Posted date
+* Direct application URL
+
+The system must prevent repeated emails for the same job/profile.
+
+Create a notification history record containing:
+
+```text
+job
+profile
+notification type
+sentAt
+status
+error
+```
+
+If an email fails, record the error and allow safe retry behavior.
+
+---
+
+# 13. Dashboard
+
+Create a clean modern dashboard showing:
+
+* Total monitored companies
+* Total active sources
+* Total jobs discovered
+* Jobs discovered recently
+* Matched jobs
+* Jobs already emailed
+* Failed sources
+* Recent high-match jobs
+
+Include a recent matches section.
+
+Each match should show:
+
+```text
+Job title
+Company
+Location
+Match score
+Posted date
+Matched skills
+Application link
+```
+
+Use cards/statistics where appropriate.
+
+---
+
+# 14. Required Pages
+
+Create these pages:
+
+### Dashboard
+
+Overview and recent matches.
+
+### Companies
+
+Manage companies.
+
+### Sources
+
+Manage career-page/API sources.
+
+### Jobs
+
+Search/filter all discovered jobs.
+
+Filters should include:
+
+* company
+* location
+* workplace type
+* source
+* date
+* match score
+* matched/not matched
+* notified/not notified
+
+### Job Details
+
+Show complete normalized job information and matching information.
+
+### Profile
+
+Candidate preferences.
+
+### Matching Rules
+
+Scoring weights, thresholds, keywords, etc.
+
+### Notification History
+
+Show previous email notifications and their status.
+
+### Source Health
+
+Show:
+
+* last fetch
+* status
+* failure count
+* last error
+* response/fetch information where useful
+
+---
+
+# 15. Database Design
+
+Create proper database migrations.
+
+At minimum consider these entities:
+
+```text
+User
+CandidateProfile
+Company
+JobSource
+Job
+JobMatch
+Notification
+MatchingConfiguration
+FetchLog
+```
+
+Use foreign keys and indexes appropriately.
+
+Important indexes should include:
+
+```text
+Company
+JobSource
+Job
+JobMatch
+Notification
+```
+
+The Job table must have a unique constraint for:
+
+```text
+companyId + sourceId + externalJobId
+```
+
+Add timestamps consistently.
+
+---
+
+# 16. Error Handling
+
+The application must gracefully handle:
+
+* source unavailable
+* HTTP errors
+* timeout
+* malformed API response
+* malformed HTML
+* missing fields
+* rate limiting
+* temporary failures
+* duplicate jobs
+* email failures
+* database failures
+
+Implement reasonable retry behavior with backoff.
+
+Do not retry indefinitely.
+
+A failing source should not prevent other sources from being processed.
+
+---
+
+# 17. Respectful Fetching
+
+Implement:
+
+* configurable request timeout
+* reasonable rate limiting
+* retry with backoff
+* descriptive user-agent where appropriate
+* no aggressive crawling
+* respect source terms/robots/access restrictions where applicable
+
+Do not attempt to defeat anti-bot mechanisms.
+
+---
+
+# 18. Logging
+
+Create structured application logs for:
+
+* scheduler runs
+* source fetches
+* number of jobs fetched
+* number of new jobs
+* normalization errors
+* matching results
+* notification attempts
+* notification failures
+* source failures
+
+Logs should be useful for debugging.
+
+---
+
+# 19. Future AI Architecture
+
+This is extremely important.
+
+Do NOT implement AI in V1.
+
+However, design the matching system so the future architecture can look like:
+
+```text
+IMatchingEngine
+       │
+       ├── RuleBasedMatcher
+       │
+       ├── AIJobMatcher
+       │
+       └── HybridMatcher
+```
+
+The rest of the application should call:
+
+```text
+matchingEngine.match(job, profile)
+```
+
+without knowing which implementation is being used.
+
+Later, AIJobMatcher should be capable of using:
+
+* LLMs
+* embeddings
+* semantic similarity
+* skill equivalence
+* role relevance
+* missing skill detection
+* explanations
+* job ranking
+
+Potential future providers include:
+
+```text
+Azure OpenAI
+Gemini
+Groq
+Mistral
+GitHub Models
+OpenAI-compatible APIs
+```
+
+Do not hardcode any provider.
+
+Future provider credentials must be stored through environment variables/configuration.
+
+The architecture should allow something like:
+
+```text
+AIProvider
+├── AzureOpenAIProvider
+├── GeminiProvider
+├── GroqProvider
+├── MistralProvider
+└── OpenAICompatibleProvider
+```
+
+without changing the Job entity, source system, notification system, or dashboard.
+
+---
+
+# 20. Security
+
+Never hardcode:
+
+* API keys
+* passwords
+* SMTP credentials
+* database credentials
+* AI provider credentials
+
+Use environment variables.
+
+Provide:
+
+```text
+.env.example
+```
+
+with placeholder values only.
+
+Validate environment configuration at startup.
+
+Do not commit secrets.
+
+---
+
+# 21. Seed Data
+
+Provide development seed data containing:
+
+* several example companies
+* example sources
+* example jobs
+* example candidate profile
+* example matching configuration
+
+The application must work immediately with seed data.
+
+Clearly mark seed data as development/demo data.
+
+---
+
+# 22. API
+
+Provide REST API endpoints for:
+
+```text
+/auth
+/companies
+/sources
+/jobs
+/jobs/:id
+/profile
+/matching
+/notifications
+/dashboard
+/scheduler
+```
+
+Use consistent:
+
+* HTTP status codes
+* validation
+* error responses
+* pagination
+* filtering
+
+Document the API.
+
+If practical, expose Swagger/OpenAPI documentation.
+
+---
+
+# 23. UI/UX
+
+Create a clean, modern, professional dashboard.
+
+Requirements:
+
+* responsive
+* desktop-first but mobile-friendly
+* clear navigation
+* accessible forms
+* loading states
+* empty states
+* error states
+* confirmation for destructive actions
+* useful success/error notifications
+* clear match-score visualization
+* readable job details
+
+Avoid excessive animations or unnecessary visual complexity.
+
+The application should look like a real SaaS product rather than a generated demo.
+
+---
+
+# 24. README
+
+Create a comprehensive README containing:
+
+### Prerequisites
+
+Required software and versions.
+
+### Installation
+
+How to install dependencies.
+
+### Environment variables
+
+Explain every variable in `.env.example`.
+
+### Database
+
+How to:
+
+* create database
+* run migrations
+* seed database
+* reset development database
+
+### Development
+
+How to start:
+
+```text
+frontend
+backend
+scheduler
+```
+
+### Manual job scan
+
+Explain how to trigger a scan manually.
+
+### Scheduler
+
+Explain how the hourly scheduler works and how to run it locally.
+
+### Email
+
+Explain how to configure the email provider.
+
+### Deployment
+
+Provide practical deployment instructions for the chosen architecture.
+
+### Adding a new job source
+
+Explain how to implement another `IJobSource`.
+
+### Adding an AI matcher later
+
+Explain exactly where an `AIJobMatcher` would be added without restructuring the application.
+
+---
+
+# 25. Testing
+
+At minimum create tests for:
+
+### Matching
+
+* title match
+* skill match
+* experience match
+* location match
+* remote preference
+* excluded keyword
+* AI/GenAI keyword match
+* freshness
+* configurable weights
+* threshold
+
+### Deduplication
+
+Verify that the same company/source/external job ID cannot create duplicate jobs.
+
+### Notification
+
+Verify that an already-notified job is not emailed again.
+
+### Source normalization
+
+Test normalization of representative Greenhouse/Lever/API/HTML responses.
+
+---
+
+# 26. Important Scope Rules
+
+Prioritize:
+
+**working end-to-end functionality over excessive complexity.**
+
+Do NOT build:
+
+* AI matching
+* browser automation
+* CAPTCHA bypass
+* authentication bypass
+* private API integrations
+* large-scale crawling infrastructure
+* microservices
+* Kubernetes
+* complex event-driven infrastructure
+* unnecessary enterprise architecture
+
+The V1 should be a **modular monolith** that is simple enough to understand and extend.
+
+---
+
+# 27. Definition of Done
+
+V1 is complete when I can:
+
+1. Start the application locally.
+2. Open the dashboard.
+3. Create/manage companies.
+4. Add a public job source.
+5. Run a manual scan.
+6. See discovered jobs in the database.
+7. Run the scheduler.
+8. Have duplicate jobs safely ignored/upserted.
+9. Configure my candidate profile.
+10. Configure matching weights and threshold.
+11. Have new jobs evaluated by `RuleBasedMatcher`.
+12. See the match score and explanation.
+13. Receive an email when a new job crosses the threshold.
+14. Verify that the same job is not emailed repeatedly.
+15. View notification history.
+16. See failed sources and errors.
+17. Run the complete system from a clean installation using the README.
+18. Understand exactly where a future `AIJobMatcher` can be plugged in.
+
+---
+
+# 28. Implementation Strategy
+
+**Do not attempt to generate every feature at once if doing so would reduce reliability.**
+
+Build the application incrementally in this order:
+
+### Phase 1
+
+Project structure + database + basic UI + API.
+
+### Phase 2
+
+Companies + sources + jobs.
+
+### Phase 3
+
+Greenhouse/Lever/public source ingestion + normalization + deduplication.
+
+### Phase 4
+
+Candidate profile + rule-based matching.
+
+### Phase 5
+
+Dashboard + job search/details.
+
+### Phase 6
+
+Email notification + notification history.
+
+### Phase 7
+
+Scheduler + retries + source health + logging.
+
+### Phase 8
+
+Testing + documentation + deployment configuration.
+
+After each phase, keep the application runnable.
+
+Do not replace working functionality with mock implementations once real functionality has been implemented.
+
+---
+
+## Final instruction to the coding agent
+
+Before writing large amounts of code, establish the project structure and database/domain model.
+
+Keep the code modular, readable, and understandable to a developer who will continue building the project manually.
+
+**The most important architectural requirement is that fetching, normalization, persistence, matching, notification, and future AI functionality remain loosely coupled.**
+
+V1 must be completely functional **without AI**.
+
+The future goal is:
+
+```text
+V1
+
+Job Sources
+    ↓
+Normalized Jobs
+    ↓
+RuleBasedMatcher
+    ↓
+Notifications
+
+
+V2
+
+Job Sources
+    ↓
+Normalized Jobs
+    ↓
+IMatchingEngine
+    ├── RuleBasedMatcher
+    ├── AIJobMatcher
+    └── HybridMatcher
+            ↓
+       Notifications
+```
+
+Build V1 with this future architecture in mind, but do not implement V2 AI functionality now.
