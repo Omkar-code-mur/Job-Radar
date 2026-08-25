@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # Job Radar
 
 Job Radar is a personal monitoring dashboard for public company career pages. It keeps a focused view of new jobs, scores them against transparent candidate preferences, and records which match alerts have been sent.
@@ -17,12 +19,12 @@ V1 intentionally does not use AI, LLMs, embeddings, browser automation, or priva
 
 ## Run locally
 
-Prerequisites: Node.js 20+ and pnpm 10+.
+Prerequisites: Node.js 22+ and npm 10+.
 
 ```bash
-pnpm install
-pnpm --filter @workspace/api-server run dev
-pnpm --filter @workspace/job-radar run dev
+npm install
+npm run dev --workspace=@workspace/api-server
+npm run dev --workspace=@workspace/job-radar
 ```
 
 The API is served at `/api`; the Job Radar web app is served at `/`.
@@ -30,9 +32,9 @@ The API is served at `/api`; the Job Radar web app is served at `/`.
 Useful checks:
 
 ```bash
-pnpm run typecheck
-pnpm --filter @workspace/api-server run typecheck
-pnpm --filter @workspace/job-radar run typecheck
+npm run typecheck
+npm run typecheck --workspace=@workspace/api-server
+npm run typecheck --workspace=@workspace/job-radar
 ```
 
 The current development store is seeded in memory so the preview works without external provider credentials. The storage boundary is isolated in the API server and can be replaced with PostgreSQL repositories when persistence is enabled.
@@ -69,5 +71,5 @@ Email delivery belongs behind an `INotificationService` abstraction. When SMTP i
 `lib/api-spec/openapi.yaml` is the source of truth. After changing it, regenerate the typed client and Zod schemas:
 
 ```bash
-pnpm --filter @workspace/api-spec run codegen
+npm run codegen --workspace=@workspace/api-spec
 ```
