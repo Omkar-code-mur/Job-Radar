@@ -1,3 +1,4 @@
+using JobRadar.Api.Sources;
 using JobRadar.Api.Sources.Greenhouse;
 using JobRadar.Api.Sources.Deloitte;
 using System.Diagnostics;
@@ -17,7 +18,15 @@ builder.Services.AddHttpClient<GreenhouseJobSource>(client =>
     client.Timeout = TimeSpan.FromSeconds(10);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("JobRadar/1.0 public-job-monitor");
 });
+builder.Services.AddHttpClient<DeloitteUsiJobSource>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; JobRadar/1.0; public-job-monitor)");
+});
+builder.Services.AddScoped<IJobSourceFetcher, GreenhouseJobSource>();
+builder.Services.AddScoped<IJobSourceFetcher, DeloitteUsiJobSource>();
 
+builder.Services.AddScoped<JobSourceFetcherFactory>();
 var connectionString = builder.Configuration["ConnectionStrings:DefaultConnection"]
     ?? builder.Configuration["DATABASE_URL"]
     ?? Environment.GetEnvironmentVariable("DATABASE_URL");
@@ -73,12 +82,6 @@ app.Use(async (context, next) =>
         }
     }
 });
-builder.Services.AddHttpClient<DeloitteUsiJobSource>(client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(20);
-    client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; JobRadar/1.0; public-job-monitor)");
-});
-
 app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/dashboard", async (CancellationToken ct) => Results.Ok(await store.DashboardAsync(ct)));
 app.MapGet("/api/companies", async (CancellationToken ct) => Results.Ok(await store.GetCompaniesAsync(ct)));
@@ -112,9 +115,15 @@ app.MapPatch("/api/sources/{id}", async (string id, SourceUpdate input, Cancella
 });
 app.MapDelete("/api/sources/{id}", async (string id, CancellationToken ct) =>
     await store.DeleteSourceAsync(id, ct) ? Results.NoContent() : Results.NotFound(new { error = "Source not found." }));
-app.MapPost("/api/sources/{id}/scan", async (string id, GreenhouseJobSource greenhouse, DeloitteUsiJobSource deloitteUsi, CancellationToken ct) =>
-    Results.Ok(await store.ScanAsync([id], greenhouse, deloitteUsi, ct)));
-
+app.MapPost("/api/sources/{id}/scan",
+    async (
+        string id,
+        JobSourceFetcherFactory sourceFetcherFactory,
+        CancellationToken ct) =>
+        Results.Ok(await store.ScanAsync(
+            [id],
+            sourceFetcherFactory,
+            ct)));
 app.MapGet("/api/jobs", async (string? search, string? status, string? location, string? workplaceType, CancellationToken ct) =>
     Results.Ok(await store.GetJobsAsync(search, status, location, workplaceType, ct)));
 app.MapGet("/api/jobs/{id}", async (string id, CancellationToken ct) =>
@@ -134,9 +143,16 @@ app.MapPut("/api/matching", async (MatchingConfiguration input, CancellationToke
     return Results.Ok(input);
 });
 app.MapGet("/api/notifications", async (CancellationToken ct) => Results.Ok(await store.GetNotificationsAsync(ct)));
-app.MapPost("/api/scheduler/scan", async (GreenhouseJobSource greenhouse, DeloitteUsiJobSource deloitteUsi, CancellationToken ct) =>
-    Results.Ok(await store.ScanAsync((await store.GetSourcesAsync(ct)).Select(source => source.Id).ToArray(), greenhouse, deloitteUsi, ct)));
-
+app.MapPost("/api/scheduler/scan",
+    async (
+        JobSourceFetcherFactory sourceFetcherFactory,
+        CancellationToken ct) =>
+        Results.Ok(await store.ScanAsync(
+            (await store.GetSourcesAsync(ct))
+                .Select(source => source.Id)
+                .ToArray(),
+            sourceFetcherFactory,
+            ct)));
 app.Run();
 
 public record Company(string Id, string Name, string Domain, string Initials, string Color, bool Enabled, int SourceCount, int JobCount, string CreatedAt);
@@ -144,8 +160,11 @@ public record CompanyInput(string Name, string Domain);
 public record CompanyUpdate(string? Name, string? Domain, bool? Enabled);
 public record JobSource(string Id, string CompanyId, string CompanyName, string Name, string Type, string Url, bool Enabled, string Status, string LastFetch, int JobsFetched, int FailureCount, string? LastError, string? BoardToken);
 public record SourceInput(string CompanyId, string Name, string Type, string Url, string? BoardToken = null);
-public record SourceUpdate(string? Name, string? Url, bool? Enabled);
-public record Job(string Id, string CompanyId, string SourceId, string Company, string Title, string Description, string Location, string WorkplaceType, string Department, string EmploymentType, string PostedDate, string FirstSeenAt, string ApplicationUrl, string SourceUrl, int Score, bool IsMatch, bool Notified, string[] MatchedSkills, string[] MissingSkills, Breakdown Breakdown);
+public record SourceUpdate(
+    string? Name,
+    string? Url,
+    bool? Enabled,
+    string? BoardToken);public record Job(string Id, string CompanyId, string SourceId, string Company, string Title, string Description, string Location, string WorkplaceType, string Department, string EmploymentType, string PostedDate, string FirstSeenAt, string ApplicationUrl, string SourceUrl, int Score, bool IsMatch, bool Notified, string[] MatchedSkills, string[] MissingSkills, Breakdown Breakdown);
 public record Breakdown(int Role, int Skills, int Experience, int Location, int AiRelevance, int Freshness);
 public record Profile(string Id, string[] Roles, string[] Skills, string[] Technologies, int MinYears, int MaxYears, string[] Locations, string WorkplacePreference, string[] IncludeKeywords, string[] ExcludeKeywords, string Email);
 public record ProfileInput(string[] Roles, string[] Skills, string[] Technologies, int MinYears, int MaxYears, string[] Locations, string WorkplacePreference, string[] IncludeKeywords, string[] ExcludeKeywords, string Email);

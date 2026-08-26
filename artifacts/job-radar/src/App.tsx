@@ -51,8 +51,9 @@ function formatRelative(value?: string | null) {
   return `${Math.round(diff / 86400000)}d ago`;
 }
 function initials(name = '') { return name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(); }
-function join(value?: string[]) { return (value || []).join(', '); }
+function join(value?: unknown) { return Array.isArray(value) ? value.join(', ') : typeof value === 'string' ? value : ''; }
 function split(value: string) { return value.split(',').map((part) => part.trim()).filter(Boolean); }
+function list(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : typeof value === 'string' ? split(value) : []; }
 
 function LoadingBlock({ lines = 4 }: { lines?: number }) {
   return <div className="space-y-3" data-testid="loading-state">{Array.from({ length: lines }).map((_, i) => <div key={i} className="h-14 animate-pulse rounded-lg bg-muted" />)}</div>;
@@ -167,12 +168,296 @@ function Companies() {
   return <div className="rise"><PageTitle eyebrow="Monitor / companies" title="Companies" detail={`${companies.length} organizations in your watchlist.`} action={<button className="btn btn-primary" onClick={() => setModal('new')} data-testid="button-add-company"><Plus size={15} />Add company</button>} /><div className="mb-5 flex flex-col gap-3 sm:flex-row"><div className="relative max-w-sm flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input className="field pl-9" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search companies…" data-testid="input-search-companies" /></div><div className="mono flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground"><span className="h-2 w-2 rounded-full bg-emerald-500" />{companies.filter((c) => c.enabled).length} active</div></div>{!filtered.length ? <EmptyState title="Your watchlist is clear" detail={companies.length ? 'No company matches that search.' : 'Add a company to start watching public career pages.'} action={!companies.length && <button className="btn btn-primary" onClick={() => setModal('new')} data-testid="button-add-company-empty"><Plus size={14} />Add first company</button>} /> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{filtered.map((c) => <div className="card group p-4 transition-transform hover:-translate-y-0.5" key={c.id} data-testid={`card-company-${c.id}`}><div className="flex items-start justify-between"><div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl text-sm font-bold" style={{ backgroundColor: `${c.color || '#d9c16f'}33`, color: c.color || '#8b6f18' }}>{c.initials || initials(c.name)}</div><div><h2 className="font-bold">{c.name}</h2><div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Globe2 size={11} />{c.domain}</div></div></div><button className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" onClick={() => setModal(c)} data-testid={`button-edit-company-${c.id}`}><MoreHorizontal size={17} /></button></div><div className="mt-5 flex items-end justify-between border-t border-border pt-3"><div className="flex gap-5"><div><div className="mono text-lg font-bold">{c.sourceCount ?? 0}</div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">sources</div></div><div><div className="mono text-lg font-bold">{c.jobCount ?? 0}</div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">jobs found</div></div></div><div className="flex items-center gap-2"><button className={`relative h-6 w-10 rounded-full transition-colors ${c.enabled ? 'bg-emerald-600' : 'bg-muted'}`} onClick={() => toggle(c)} aria-label={`Toggle ${c.name}`} data-testid={`button-toggle-company-${c.id}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-card transition-transform ${c.enabled ? 'left-5' : 'left-1'}`} /></button><button className="rounded-md p-1.5 text-muted-foreground hover:bg-red-50 hover:text-destructive" onClick={() => { if (window.confirm(`Remove ${c.name} from your watchlist?`)) del.mutate({ id: c.id }, { onSuccess: () => qc.invalidateQueries({ queryKey: getListCompaniesQueryKey() }) }); }} data-testid={`button-delete-company-${c.id}`}><Trash2 size={14} /></button></div></div></div>)}</div>}{modal && <CompanyModal company={modal === 'new' ? undefined : modal} close={() => setModal(null)} />}</div>;
 }
 
-function SourceModal({ source, companies, close }: { source?: any; companies: any[]; close: () => void }) {
-  const [companyId, setCompanyId] = useState(source?.companyId || companies[0]?.id || ''); const [name, setName] = useState(source?.name || ''); const [type, setType] = useState(source?.type || 'GREENHOUSE_API'); const [url, setUrl] = useState(source?.url || '');
-  const qc = useQueryClient(); const create = useCreateSource(); const update = useUpdateSource();
-  const submit = (e: React.FormEvent) => { e.preventDefault(); const done = () => { qc.invalidateQueries({ queryKey: getListSourcesQueryKey() }); qc.invalidateQueries({ queryKey: getListCompaniesQueryKey() }); close(); }; source ? update.mutate({ id: source.id, data: { name, url } }, { onSuccess: done }) : create.mutate({ data: { companyId, name, type, url } }, { onSuccess: done }); };
-  if (!source && !companies.length) return <Modal title="Add source" close={close}><div className="space-y-4"><p className="text-sm text-muted-foreground">A source belongs to a company. Add a company first, then return here to connect its career page or public job API.</p><div className="flex justify-end gap-2"><button type="button" className="btn btn-ghost" onClick={close} data-testid="button-cancel-source">Cancel</button><Link href="/companies" className="btn btn-primary" onClick={close} data-testid="link-add-company-first"><Plus size={15} />Add company first</Link></div></div></Modal>;
-  return <Modal title={source ? 'Edit source' : 'Add source'} close={close}><form className="space-y-4" onSubmit={submit}>{!source && <div><label className="label" htmlFor="source-company">Company</label><select id="source-company" className="field" value={companyId} onChange={(e) => setCompanyId(e.target.value)} required data-testid="select-source-company">{companies.map((c) => <option value={c.id} key={c.id}>{c.name}</option>)}</select></div>}<div><label className="label" htmlFor="source-name">Source name</label><input id="source-name" className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Main careers page" required data-testid="input-source-name" /></div>{!source && <div><label className="label" htmlFor="source-type">Connector</label><select id="source-type" className="field" value={type} onChange={(e) => { const next = e.target.value; setType(next); if (next === 'DELOITTE_USI') setUrl('https://usijobs.deloitte.com/careersUSI/SearchJobs'); }} data-testid="select-source-type"><option value="GREENHOUSE_API">Greenhouse API</option><option value="DELOITTE_USI">Deloitte USI careers</option><option value="LEVER_API">Lever API</option><option value="STRUCTURED_HTML">Structured HTML</option><option value="GENERIC_HTML">Generic HTML</option></select></div>}<div><label className="label" htmlFor="source-url">Source URL</label><input id="source-url" type="url" className="field" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" required data-testid="input-source-url" /></div>{type === 'DELOITTE_USI' && <p className="text-xs text-muted-foreground">Uses Deloitte USI’s official public job search and creates direct “Apply” links for every role.</p>}<div className="flex justify-end gap-2 pt-2"><button type="button" className="btn btn-ghost" onClick={close} data-testid="button-cancel-source">Cancel</button><button className="btn btn-primary" disabled={create.isPending || update.isPending} data-testid="button-save-source">{create.isPending || update.isPending ? 'Saving…' : source ? 'Save changes' : 'Add source'}</button></div></form></Modal>;
+function SourceModal({
+  source,
+  companies,
+  close,
+}: {
+  source?: any;
+  companies: any[];
+  close: () => void;
+}) {
+  const [companyId, setCompanyId] = useState(
+    source?.companyId || companies[0]?.id || ''
+  );
+  const [name, setName] = useState(source?.name || '');
+  const [type, setType] = useState(
+    source?.type || 'GREENHOUSE_API'
+  );
+  const [url, setUrl] = useState(source?.url || '');
+  const [boardToken, setBoardToken] = useState(
+    source?.boardToken || ''
+  );
+
+  const qc = useQueryClient();
+  const create = useCreateSource();
+  const update = useUpdateSource();
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const done = () => {
+      qc.invalidateQueries({
+        queryKey: getListSourcesQueryKey(),
+      });
+      qc.invalidateQueries({
+        queryKey: getListCompaniesQueryKey(),
+      });
+      close();
+    };
+
+    if (source) {
+      update.mutate(
+        {
+          id: source.id,
+          data: {
+            name,
+            url,
+            ...(type === 'GREENHOUSE_API'
+              ? { boardToken }
+              : {}),
+          },
+        },
+        {
+          onSuccess: done,
+        }
+      );
+    } else {
+      create.mutate(
+        {
+          data: {
+            companyId,
+            name,
+            type,
+            url,
+            ...(type === 'GREENHOUSE_API'
+              ? { boardToken }
+              : {}),
+          },
+        },
+        {
+          onSuccess: done,
+        }
+      );
+    }
+  };
+
+  if (!source && !companies.length) {
+    return (
+      <Modal title="Add source" close={close}>
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            A source belongs to a company. Add a company first, then
+            return here to connect its career page or public job API.
+          </p>
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={close}
+              data-testid="button-cancel-source"
+            >
+              Cancel
+            </button>
+
+            <Link
+              href="/companies"
+              className="btn btn-primary"
+              onClick={close}
+              data-testid="link-add-company-first"
+            >
+              <Plus size={15} />
+              Add company first
+            </Link>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal
+      title={source ? 'Edit source' : 'Add source'}
+      close={close}
+    >
+      <form className="space-y-4" onSubmit={submit}>
+        {!source && (
+          <div>
+            <label
+              className="label"
+              htmlFor="source-company"
+            >
+              Company
+            </label>
+
+            <select
+              id="source-company"
+              className="field"
+              value={companyId}
+              onChange={(e) => setCompanyId(e.target.value)}
+              required
+              data-testid="select-source-company"
+            >
+              {companies.map((c) => (
+                <option value={c.id} key={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div>
+          <label
+            className="label"
+            htmlFor="source-name"
+          >
+            Source name
+          </label>
+
+          <input
+            id="source-name"
+            className="field"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Main careers page"
+            required
+            data-testid="input-source-name"
+          />
+        </div>
+
+        {!source && (
+          <div>
+            <label
+              className="label"
+              htmlFor="source-type"
+            >
+              Connector
+            </label>
+
+            <select
+              id="source-type"
+              className="field"
+              value={type}
+              onChange={(e) => {
+                const next = e.target.value;
+
+                setType(next);
+
+                if (next === 'DELOITTE_USI') {
+                  setUrl(
+                    'https://usijobs.deloitte.com/careersUSI/SearchJobs'
+                  );
+                }
+
+                if (next !== 'GREENHOUSE_API') {
+                  setBoardToken('');
+                }
+              }}
+              data-testid="select-source-type"
+            >
+              <option value="GREENHOUSE_API">
+                Greenhouse API
+              </option>
+
+              <option value="DELOITTE_USI">
+                Deloitte USI careers
+              </option>
+
+              <option value="LEVER_API">
+                Lever API
+              </option>
+
+              <option value="STRUCTURED_HTML">
+                Structured HTML
+              </option>
+
+              <option value="GENERIC_HTML">
+                Generic HTML
+              </option>
+            </select>
+          </div>
+        )}
+
+        <div>
+          <label
+            className="label"
+            htmlFor="source-url"
+          >
+            Source URL
+          </label>
+
+          <input
+            id="source-url"
+            type="url"
+            className="field"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://…"
+            required
+            data-testid="input-source-url"
+          />
+        </div>
+
+        {type === 'GREENHOUSE_API' && (
+          <div>
+            <label
+              className="label"
+              htmlFor="source-board-token"
+            >
+              Greenhouse Board Token
+            </label>
+
+            <input
+              id="source-board-token"
+              className="field"
+              value={boardToken}
+              onChange={(e) => setBoardToken(e.target.value)}
+              placeholder="e.g. addepar1"
+              required
+              data-testid="input-source-board-token"
+            />
+
+            <p className="mt-1 text-xs text-muted-foreground">
+              The board token used by the public Greenhouse Job
+              Board API.
+            </p>
+          </div>
+        )}
+
+        {type === 'DELOITTE_USI' && (
+          <p className="text-xs text-muted-foreground">
+            Uses Deloitte USI’s official public job search and
+            creates direct “Apply” links for every role.
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={close}
+            data-testid="button-cancel-source"
+          >
+            Cancel
+          </button>
+
+          <button
+            className="btn btn-primary"
+            disabled={create.isPending || update.isPending}
+            data-testid="button-save-source"
+          >
+            {create.isPending || update.isPending
+              ? 'Saving…'
+              : source
+                ? 'Save changes'
+                : 'Add source'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
 }
 function SourceCard({ source, onEdit }: { source: any; onEdit: () => void }) {
   const qc = useQueryClient(); const scan = useScanSource(); const del = useDeleteSource(); const update = useUpdateSource();
@@ -203,7 +488,7 @@ function JobDetail() {
 function Profile() {
   const q = useGetProfile(); const update = useUpdateProfile(); const qc = useQueryClient(); const profile: any = q.data; const [form, setForm] = useState<any>(null);
   const data = form || profile; if (q.isLoading) return <><PageTitle eyebrow="Tune / candidate profile" title="Candidate profile" detail="The baseline your matching engine reasons from." /><LoadingBlock lines={7} /></>; if (q.isError || !data) return <QueryError retry={() => q.refetch()} />;
-  const patch = (key: string, value: any) => setForm({ ...data, [key]: value }); const save = () => update.mutate({ data: { ...data, ...form, roles: typeof data.roles === 'string' ? split(data.roles) : data.roles, skills: typeof data.skills === 'string' ? split(data.skills) : data.skills, technologies: typeof data.technologies === 'string' ? split(data.technologies) : data.technologies, locations: typeof data.locations === 'string' ? split(data.locations) : data.locations, includeKeywords: typeof data.includeKeywords === 'string' ? split(data.includeKeywords) : data.includeKeywords, excludeKeywords: typeof data.excludeKeywords === 'string' ? split(data.excludeKeywords) : data.excludeKeywords } }, { onSuccess: (next) => { setForm(null); qc.setQueryData(getGetProfileQueryKey(), next); } });
+  const patch = (key: string, value: any) => setForm({ ...data, [key]: value }); const save = () => update.mutate({ data: { ...data, ...form, roles: list(data.roles), skills: list(data.skills), technologies: list(data.technologies), locations: list(data.locations), includeKeywords: list(data.includeKeywords), excludeKeywords: list(data.excludeKeywords) } }, { onSuccess: (next) => { setForm(null); qc.setQueryData(getGetProfileQueryKey(), next); } });
   const fields = [['roles', 'Target roles', 'Product design, UX research'], ['skills', 'Core skills', 'Research, prototyping, facilitation'], ['technologies', 'Tools & technologies', 'Figma, SQL, Notion'], ['locations', 'Preferred locations', 'New York, London, Remote'], ['includeKeywords', 'Include keywords', 'staff, platform, zero-to-one'], ['excludeKeywords', 'Exclude keywords', 'senior manager, contract']];
   return <div className="rise"><PageTitle eyebrow="Tune / candidate profile" title="Candidate profile" detail="The baseline your matching engine reasons from." action={<button className="btn btn-primary" onClick={save} disabled={!form || update.isPending} data-testid="button-save-profile"><Check size={15} />{update.isPending ? 'Saving…' : 'Save profile'}</button>} /><div className="grid gap-6 xl:grid-cols-[1.2fr_.8fr]"><div className="card p-5 sm:p-7"><div className="mb-6 border-b border-border pb-5"><div className="label">Contact</div><input className="field max-w-md" type="email" value={data.email || ''} onChange={(e) => patch('email', e.target.value)} placeholder="you@example.com" data-testid="input-profile-email" /></div><div className="grid gap-5 sm:grid-cols-2">{fields.map(([key, label, placeholder]) => <div key={key} className={key === 'includeKeywords' || key === 'excludeKeywords' ? '' : ''}><label className="label" htmlFor={`profile-${key}`}>{label}</label><input id={`profile-${key}`} className="field" value={join(data[key])} onChange={(e) => patch(key, e.target.value)} placeholder={placeholder} data-testid={`input-profile-${key}`} /><p className="mt-1.5 text-[10px] text-muted-foreground">Separate values with commas</p></div>)}</div></div><div className="space-y-5"><div className="card p-5"><div className="label">Experience window</div><div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-xs text-muted-foreground">Minimum years</label><input className="field" type="number" min="0" value={data.minYears ?? 0} onChange={(e) => patch('minYears', Number(e.target.value))} data-testid="input-profile-min-years" /></div><div><label className="mb-1 block text-xs text-muted-foreground">Maximum years</label><input className="field" type="number" min="0" value={data.maxYears ?? 10} onChange={(e) => patch('maxYears', Number(e.target.value))} data-testid="input-profile-max-years" /></div></div></div><div className="card p-5"><div className="label">Workplace preference</div><div className="grid grid-cols-2 gap-2">{['Any', 'Remote', 'Hybrid', 'On-site'].map((value) => <button className={`rounded-lg border px-3 py-2 text-sm font-bold ${data.workplacePreference === value ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:bg-muted'}`} onClick={() => patch('workplacePreference', value)} key={value} data-testid={`button-workplace-${value}`}>{value}</button>)}</div></div><div className="rounded-xl border border-accent/50 bg-accent/10 p-5 text-sm"><div className="flex items-center gap-2 font-bold"><Sparkles size={16} className="text-amber-700" />A sharper profile, better signal</div><p className="mt-2 text-xs leading-relaxed text-muted-foreground">Keywords and workplace preference influence every score. Keep them specific enough to filter noise, broad enough to catch a good surprise.</p></div></div></div></div>;
 }

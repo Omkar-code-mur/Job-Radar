@@ -1,11 +1,16 @@
 using System.Net;
+using JobRadar.Api.Sources;
 using System.Text.RegularExpressions;
 
 namespace JobRadar.Api.Sources.Deloitte;
 
 /// <summary>Reads publicly listed vacancies from Deloitte USI's Avature careers search.</summary>
-public sealed partial class DeloitteUsiJobSource(HttpClient httpClient, ILogger<DeloitteUsiJobSource> logger)
+public sealed partial class DeloitteUsiJobSource(
+    HttpClient httpClient,
+    ILogger<DeloitteUsiJobSource> logger)
+    : IJobSourceFetcher
 {
+    public string SourceType => "DELOITTE_USI";
     private const int PageSize = 50;
 
     public async Task<IReadOnlyList<Job>> FetchAsync(JobSource source, string companyName, CancellationToken cancellationToken)

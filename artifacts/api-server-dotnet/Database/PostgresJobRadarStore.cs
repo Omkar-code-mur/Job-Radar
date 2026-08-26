@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Npgsql;
-using JobRadar.Api.Sources.Greenhouse;
-using JobRadar.Api.Sources.Deloitte;
+using JobRadar.Api.Sources;
 
 public sealed class PostgresJobRadarStore
 {
@@ -151,162 +150,108 @@ public sealed class PostgresJobRadarStore
     public async Task SaveMatchingAsync(MatchingConfiguration input, CancellationToken cancellationToken = default) { await using var connection=await OpenAsync(cancellationToken); await using var command=new NpgsqlCommand("update matching_configurations set threshold=@threshold,role_weight=@role,skills_weight=@skills,experience_weight=@experience,location_weight=@location,ai_weight=@ai,freshness_weight=@freshness where id=1",connection); Add(command,"threshold",input.Threshold); Add(command,"role",input.RoleWeight); Add(command,"skills",input.SkillsWeight); Add(command,"experience",input.ExperienceWeight); Add(command,"location",input.LocationWeight); Add(command,"ai",input.AiWeight); Add(command,"freshness",input.FreshnessWeight); await command.ExecuteNonQueryAsync(cancellationToken); }
 
     public async Task<object> DashboardAsync(CancellationToken cancellationToken = default) { var companies=await GetCompaniesAsync(cancellationToken); var sources=await GetSourcesAsync(cancellationToken); var jobs=await GetJobsAsync(null,null,null,null,cancellationToken); return new { stats=new { companies=companies.Count(item=>item.Enabled), activeSources=sources.Count(item=>item.Enabled), jobs=jobs.Count, newJobs=jobs.Count(item=>DateTimeOffset.TryParse(item.FirstSeenAt,out var date)&&date>DateTimeOffset.UtcNow.AddDays(-1)), matchedJobs=jobs.Count(item=>item.IsMatch), notifiedJobs=jobs.Count(item=>item.Notified), failedSources=sources.Count(item=>item.Status is "failed" or "warning") }, recentMatches=jobs.Where(item=>item.IsMatch).OrderByDescending(item=>item.Score).Take(5), sourceHealth=sources }; }
-    public async Task<ScanResult> ScanAsync(IReadOnlyCollection<string> ids, GreenhouseJobSource greenhouse, DeloitteUsiJobSource deloitteUsi, CancellationToken cancellationToken = default)
+    public async Task<ScanResult> ScanAsync(
+        IReadOnlyCollection<string> ids,
+        JobSourceFetcherFactory sourceFetcherFactory,
+        CancellationToken cancellationToken = default)
     {
         var sources = (await GetSourcesAsync(cancellationToken))
-            .Where(item => ids.Contains(item.Id) && item.Enabled && item.Type is "GREENHOUSE_API" or "DELOITTE_USI")
+            .Where(item =>
+                ids.Contains(item.Id) &&
+                item.Enabled)
             .ToList();
+
         var fetched = 0;
         var added = 0;
+
+        var profile = await GetProfileAsync(cancellationToken);
+        var matching = await GetMatchingAsync(cancellationToken);
+
         foreach (var source in sources)
         {
             try
             {
-                var jobs = source.Type == "DELOITTE_USI"
-                    ? await deloitteUsi.FetchAsync(source, source.CompanyName, cancellationToken)
-                    : await greenhouse.FetchAsync(source, source.CompanyName, cancellationToken);
-                var existing = (await GetJobsAsync(null, null, null, null, cancellationToken)).Select(item => item.Id).ToHashSet();
+                var fetcher = sourceFetcherFactory.Get(source.Type);
+
+                var jobs = await fetcher.FetchAsync(
+                    source,
+                    source.CompanyName,
+                    cancellationToken);
+
+                jobs = jobs
+                    .Select(job => ScoreJob(job, profile, matching))
+                    .ToList();
+
+                var existing = (await GetJobsAsync(
+                        null,
+                        null,
+                        null,
+                        null,
+                        cancellationToken))
+                    .Select(item => item.Id)
+                    .ToHashSet();
+
                 await UpsertJobsAsync(jobs, cancellationToken);
+
                 fetched += jobs.Count;
                 added += jobs.Count(item => !existing.Contains(item.Id));
-                await UpdateSourceHealthAsync(source.Id, jobs.Count, null, cancellationToken);
+
+                await UpdateSourceHealthAsync(
+                    source.Id,
+                    jobs.Count,
+                    null,
+                    cancellationToken);
+            }
+            catch (NotSupportedException exception)
+            {
+                await UpdateSourceHealthAsync(
+                    source.Id,
+                    0,
+                    exception.Message,
+                    cancellationToken);
+
+                // Unsupported source types should not crash the entire scan.
+                continue;
             }
             catch (Exception exception)
             {
-                await UpdateSourceHealthAsync(source.Id, 0, exception.Message, cancellationToken);
+                await UpdateSourceHealthAsync(
+                    source.Id,
+                    0,
+                    exception.Message,
+                    cancellationToken);
+
                 throw;
             }
         }
-        return new(sources.Count, fetched, added, added, 0);
+
+        return new(
+            sources.Count,
+            fetched,
+            added,
+            added,
+            0);
     }
 
     public async Task<IReadOnlyList<Notification>> GetNotificationsAsync(CancellationToken cancellationToken = default) { await using var connection=await OpenAsync(cancellationToken); await using var command=new NpgsqlCommand("select id,job_id,job_title,company,score,type,sent_at,status,error from notifications order by sent_at desc",connection); await using var reader=await command.ExecuteReaderAsync(cancellationToken); var result=new List<Notification>(); while(await reader.ReadAsync(cancellationToken)) result.Add(new(reader.GetString(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetInt32(4),reader.GetString(5),reader.GetString(6),reader.GetString(7),reader.IsDBNull(8)?null:reader.GetString(8))); return result; }
 
-    public async Task<(int CompaniesAdded, int SourcesAdded, int Skipped)> ImportSeedCsvAsync(
-    string csvPath,
-    CancellationToken cancellationToken = default)
-{
-    if (!File.Exists(csvPath))
-        throw new FileNotFoundException("Seed CSV not found.", csvPath);
-
-    var lines = await File.ReadAllLinesAsync(csvPath, cancellationToken);
-
-    if (lines.Length <= 1)
-        return (0, 0, 0);
-
-    var companiesAdded = 0;
-    var sourcesAdded = 0;
-    var skipped = 0;
-
-    await using var connection = await OpenAsync(cancellationToken);
-    await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-    foreach (var line in lines.Skip(1))
-    {
-        if (string.IsNullOrWhiteSpace(line))
-            continue;
-
-        var columns = line.Split(',');
-
-        if (columns.Length < 6)
-            continue;
-
-        var name = columns[0].Trim();
-        var domain = columns[1].Trim();
-        var city = columns[2].Trim();
-        var country = columns[3].Trim();
-        var careerUrl = columns[4].Trim();
-        var enabled = bool.TryParse(columns[5].Trim(), out var parsedEnabled)
-            && parsedEnabled;
-
-        if (string.IsNullOrWhiteSpace(name) ||
-            string.IsNullOrWhiteSpace(domain) ||
-            string.IsNullOrWhiteSpace(careerUrl))
-            continue;
-
-        // Check whether company already exists.
-        await using var companyLookup = new NpgsqlCommand(
-            "select id from companies where lower(domain) = lower(@domain) limit 1",
-            connection,
-            transaction);
-
-        companyLookup.Parameters.AddWithValue("domain", domain);
-
-        var existingCompanyId =
-            await companyLookup.ExecuteScalarAsync(cancellationToken);
-
-        string companyId;
-
-        if (existingCompanyId is not null)
-        {
-            companyId = existingCompanyId.ToString()!;
-            skipped++;
-        }
-        else
-        {
-            companyId = $"company-{Guid.NewGuid():N}"[..16];
-
-            var initials = Initials(name);
-
-            await using var companyInsert = new NpgsqlCommand("""
-                insert into companies
-                    (id, name, domain, initials, color, enabled, created_at)
-                values
-                    (@id, @name, @domain, @initials, @color, @enabled, @created)
-                """, connection, transaction);
-
-            Add(companyInsert, "id", companyId);
-            Add(companyInsert, "name", name);
-            Add(companyInsert, "domain", domain);
-            Add(companyInsert, "initials", initials);
-            Add(companyInsert, "color", "#5B5CE2");
-            Add(companyInsert, "enabled", enabled);
-            Add(companyInsert, "created", DateTimeOffset.UtcNow);
-
-            await companyInsert.ExecuteNonQueryAsync(cancellationToken);
-
-            companiesAdded++;
-        }
-
-        // Check whether this career source already exists.
-        await using var sourceLookup = new NpgsqlCommand(
-            "select id from sources where lower(url) = lower(@url) limit 1",
-            connection,
-            transaction);
-
-        sourceLookup.Parameters.AddWithValue("url", careerUrl);
-
-        var existingSourceId =
-            await sourceLookup.ExecuteScalarAsync(cancellationToken);
-
-        if (existingSourceId is not null)
-            continue;
-
-        var sourceId = $"source-{Guid.NewGuid():N}"[..15];
-
-        await using var sourceInsert = new NpgsqlCommand("""
-            insert into sources
-                (id, company_id, name, type, url, enabled, status, last_fetch)
-            values
-                (@id, @company, @name, @type, @url, false, 'never_run', 'Never')
-            """, connection, transaction);
-
-        Add(sourceInsert, "id", sourceId);
-        Add(sourceInsert, "company", companyId);
-        Add(sourceInsert, "name", $"{name} Careers");
-        Add(sourceInsert, "type", "GENERIC_HTML");
-        Add(sourceInsert, "url", careerUrl);
-
-        await sourceInsert.ExecuteNonQueryAsync(cancellationToken);
-
-        sourcesAdded++;
-    }
-
-    await transaction.CommitAsync(cancellationToken);
-
-    return (companiesAdded, sourcesAdded, skipped);
-}
     private async Task UpdateSourceHealthAsync(string id,int jobs,string? error,CancellationToken cancellationToken) { await using var connection=await OpenAsync(cancellationToken); await using var command=new NpgsqlCommand("update sources set status=@status,last_fetch=@fetch,jobs_fetched=@jobs,last_error=@error where id=@id",connection); Add(command,"id",id); Add(command,"status",error is null?"healthy":"failed"); Add(command,"fetch",DateTimeOffset.UtcNow.ToString("O")); Add(command,"jobs",jobs); Add(command,"error",(object?)error??DBNull.Value); await command.ExecuteNonQueryAsync(cancellationToken); }
+    private static Job ScoreJob(Job job, Profile profile, MatchingConfiguration matching)
+    {
+        var text = $"{job.Title} {job.Description} {job.Department} {job.Location}".ToLowerInvariant();
+        var excluded = profile.ExcludeKeywords.Any(keyword => Contains(text, keyword));
+        var matchedSkills = profile.Skills.Concat(profile.Technologies).Where(keyword => Contains(text, keyword)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var roleMatched = profile.Roles.Any(role => Contains(text, role));
+        var locationMatched = profile.Locations.Length == 0 || profile.Locations.Any(location => Contains(job.Location, location));
+        var includeMatched = profile.IncludeKeywords.Length == 0 || profile.IncludeKeywords.Any(keyword => Contains(text, keyword));
+        var roleScore = roleMatched ? matching.RoleWeight : 0;
+        var skillsScore = profile.Skills.Length + profile.Technologies.Length == 0 ? matching.SkillsWeight : (int)Math.Round(matching.SkillsWeight * (double)matchedSkills.Length / (profile.Skills.Length + profile.Technologies.Length));
+        var locationScore = locationMatched ? matching.LocationWeight : 0;
+        var score = excluded ? 0 : roleScore + skillsScore + locationScore + (includeMatched ? matching.AiWeight : 0) + matching.FreshnessWeight;
+        var breakdown = new Breakdown(roleScore, skillsScore, 0, locationScore, includeMatched ? matching.AiWeight : 0, matching.FreshnessWeight);
+        return job with { Score = Math.Min(score, 100), IsMatch = !excluded && score >= matching.Threshold, MatchedSkills = matchedSkills, MissingSkills = profile.Skills.Where(keyword => !Contains(text, keyword)).ToArray(), Breakdown = breakdown };
+    }
+    private static bool Contains(string text, string value) => !string.IsNullOrWhiteSpace(value) && text.Contains(value.Trim(), StringComparison.OrdinalIgnoreCase);
     private async Task<List<Job>> ReadJobsAsync(NpgsqlCommand command,CancellationToken cancellationToken) { await using var reader=await command.ExecuteReaderAsync(cancellationToken); var result=new List<Job>(); while(await reader.ReadAsync(cancellationToken)) result.Add(new(reader.GetString(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetString(4),reader.GetString(5),reader.GetString(6),reader.GetString(7),reader.GetString(8),reader.GetString(9),reader.GetString(10),reader.GetString(11),reader.GetString(12),reader.GetString(13),reader.GetInt32(14),reader.GetBoolean(15),reader.GetBoolean(16),Json<string[]>(reader.GetFieldValue<string>(17)),Json<string[]>(reader.GetFieldValue<string>(18)),Json<Breakdown>(reader.GetFieldValue<string>(19)))); return result; }
     private async Task<NpgsqlConnection> OpenAsync(CancellationToken cancellationToken) { var connection=new NpgsqlConnection(connectionString); await connection.OpenAsync(cancellationToken); return connection; }
     private async Task<bool> ExecuteBoolAsync(string sql,string id,CancellationToken cancellationToken) { await using var connection=await OpenAsync(cancellationToken); await using var command=new NpgsqlCommand(sql,connection); Add(command,"id",id); return await command.ExecuteNonQueryAsync(cancellationToken)>0; }

@@ -1,11 +1,16 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using JobRadar.Api.Sources;
 
 namespace JobRadar.Api.Sources.Greenhouse;
 
-public sealed class GreenhouseJobSource(HttpClient httpClient, ILogger<GreenhouseJobSource> logger)
+public sealed class GreenhouseJobSource(
+    HttpClient httpClient,
+    ILogger<GreenhouseJobSource> logger)
+    : JobRadar.Api.Sources.IJobSourceFetcher
 {
+    public string SourceType => "GREENHOUSE_API";
     private const int MaxRetries = 2;
 
     public async Task<IReadOnlyList<Job>> FetchAsync(JobSource source, string companyName, CancellationToken cancellationToken)
