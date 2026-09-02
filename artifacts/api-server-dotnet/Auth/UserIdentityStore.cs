@@ -44,8 +44,13 @@ public sealed class UserIdentityStore
         string? adminEmail,
         CancellationToken cancellationToken = default)
     {
-        var subject = principal.FindFirst("sub")?.Value;
-        var email = principal.FindFirst("email")?.Value;
+        // Accept both the Supabase JWT-style claims and the standard .NET claim types.
+        // This keeps the identity lookup resilient to claim-type mapping performed by
+        // authentication handlers or middleware.
+        var subject = principal.FindFirst("sub")?.Value
+            ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var email = principal.FindFirst("email")?.Value
+            ?? principal.FindFirst(ClaimTypes.Email)?.Value;
 
         if (!Guid.TryParse(subject, out var userId) || string.IsNullOrWhiteSpace(email))
             return null;
@@ -55,11 +60,11 @@ public sealed class UserIdentityStore
 
         const string upsertSql = """
             insert into users (id, email, role)
-            values (@id, @email, case when lower(@email) = lower(@admin_email) then 'ADMIN' else 'USER' end)
+            values (@id, @email, case when @admin_email is not null and lower(@email) = lower(@admin_email) then 'ADMIN' else 'USER' end)
             on conflict (id) do update set
                 email = excluded.email,
                 role = case
-                    when lower(excluded.email) = lower(@admin_email) then 'ADMIN'
+                    when @admin_email is not null and lower(excluded.email) = lower(@admin_email) then 'ADMIN'
                     else users.role
                 end,
                 updated_at = now();

@@ -55,19 +55,26 @@ async function supabaseAuth(path: string, body: Record<string, unknown>) {
   return data as AuthSession & { user?: AuthSession['user'] };
 }
 
+async function verifySession(session: AuthSession) {
+  const { url, anonKey } = getSupabaseConfig();
+  if (!url || !anonKey || !session.access_token) return false;
+
+  const response = await fetch(`${url}/auth/v1/user`, {
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  });
+
+  return response.ok;
+}
+
 async function refreshSession(session: AuthSession) {
   const refreshed = await supabaseAuth('token?grant_type=refresh_token', {
     refresh_token: session.refresh_token,
   });
   saveSession(refreshed);
   return refreshed;
-}
-
-async function verifySession(session: AuthSession) {
-  const response = await fetch('/api/auth/me', {
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
-  return response.ok;
 }
 
 export default function AuthGate({ children }: AuthGateProps) {

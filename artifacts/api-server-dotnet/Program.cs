@@ -2,8 +2,7 @@ using JobRadar.Api.Auth;
 using JobRadar.Api.Sources;
 using JobRadar.Api.Sources.Greenhouse;
 using JobRadar.Api.Sources.Deloitte;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Authentication;
 using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,31 +18,26 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 
 var supabaseUrl = builder.Configuration["SUPABASE_URL"]
     ?? Environment.GetEnvironmentVariable("SUPABASE_URL");
+var supabaseKey = builder.Configuration["SUPABASE_ANON_KEY"]
+    ?? builder.Configuration["SUPABASE_PUBLISHABLE_KEY"]
+    ?? Environment.GetEnvironmentVariable("SUPABASE_ANON_KEY")
+    ?? Environment.GetEnvironmentVariable("SUPABASE_PUBLISHABLE_KEY");
 var adminEmail = builder.Configuration["JOBRADAR_ADMIN_EMAIL"]
     ?? Environment.GetEnvironmentVariable("JOBRADAR_ADMIN_EMAIL");
 
 if (string.IsNullOrWhiteSpace(supabaseUrl))
     throw new InvalidOperationException("SUPABASE_URL must be configured.");
+if (string.IsNullOrWhiteSpace(supabaseKey))
+    throw new InvalidOperationException("SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY must be configured.");
 
-var supabaseIssuer = $"{supabaseUrl.TrimEnd('/')}/auth/v1";
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.Authority = supabaseIssuer;
-        options.MetadataAddress = $"{supabaseIssuer}/.well-known/openid-configuration";
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = supabaseIssuer,
-            ValidateAudience = true,
-            ValidAudience = "authenticated",
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ClockSkew = TimeSpan.FromSeconds(30),
-        };
-    });
+builder.Services.AddAuthentication("Supabase")
+    .AddScheme<AuthenticationSchemeOptions, SupabaseAuthenticationHandler>("Supabase", _ => { });
 builder.Services.AddAuthorization();
 
+builder.Services.AddHttpClient("SupabaseAuth", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
 builder.Services.AddHttpClient<GreenhouseJobSource>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);
@@ -66,8 +60,8 @@ if (string.IsNullOrWhiteSpace(connectionString))
 
 var store = new PostgresJobRadarStore(connectionString);
 var userIdentityStore = new UserIdentityStore(connectionString);
-await store.InitializeAsync();
 await userIdentityStore.InitializeAsync();
+await store.InitializeAsync();
 
 var app = builder.Build();
 app.UseCors();
@@ -168,12 +162,14 @@ api.MapDelete("/sources/{id}", async (string id, CancellationToken ct) =>
 api.MapPost("/sources/{id}/scan",
     async (
         string id,
+        HttpContext context,
         JobSourceFetcherFactory sourceFetcherFactory,
         CancellationToken ct) =>
-        Results.Ok(await store.ScanAsync(
-            [id],
-            sourceFetcherFactory,
-            ct)));
+    {
+        var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+        if (user is null) return Results.Unauthorized();
+        return Results.Ok(await store.ScanAsync(user.Id, [id], sourceFetcherFactory, ct));
+    });
 api.MapGet("/jobs", async (string? search, string? status, string? location, string? workplaceType, CancellationToken ct) =>
     Results.Ok(await store.GetJobsAsync(search, status, location, workplaceType, ct)));
 api.MapGet("/jobs/{id}", async (string id, CancellationToken ct) =>
@@ -181,28 +177,48 @@ api.MapGet("/jobs/{id}", async (string id, CancellationToken ct) =>
     var job = await store.GetJobAsync(id, ct);
     return job is null ? Results.NotFound(new { error = "Job not found." }) : Results.Ok(job);
 });
-api.MapGet("/profile", async (CancellationToken ct) => Results.Ok(await store.GetProfileAsync(ct)));
-api.MapPut("/profile", async (ProfileInput input, CancellationToken ct) => Results.Ok(await store.SaveProfileAsync(input, ct)));
-api.MapGet("/matching", async (CancellationToken ct) => Results.Ok(await store.GetMatchingAsync(ct)));
-api.MapPut("/matching", async (MatchingConfiguration input, CancellationToken ct) =>
+api.MapGet("/profile", async (HttpContext context, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    return user is null ? Results.Unauthorized() : Results.Ok(await store.GetProfileAsync(user.Id, ct));
+});
+api.MapPut("/profile", async (HttpContext context, ProfileInput input, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    return user is null ? Results.Unauthorized() : Results.Ok(await store.SaveProfileAsync(user.Id, input, ct));
+});
+api.MapGet("/matching", async (HttpContext context, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    return user is null ? Results.Unauthorized() : Results.Ok(await store.GetMatchingAsync(user.Id, ct));
+});
+api.MapPut("/matching", async (HttpContext context, MatchingConfiguration input, CancellationToken ct) =>
 {
     var total = input.RoleWeight + input.SkillsWeight + input.ExperienceWeight + input.LocationWeight + input.AiWeight + input.FreshnessWeight;
     if (input.Threshold is < 0 or > 100 || total != 100)
         return Results.BadRequest(new { error = "Scoring weights must total 100." });
-    await store.SaveMatchingAsync(input, ct);
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    if (user is null) return Results.Unauthorized();
+    await store.SaveMatchingAsync(user.Id, input, ct);
     return Results.Ok(input);
 });
 api.MapGet("/notifications", async (CancellationToken ct) => Results.Ok(await store.GetNotificationsAsync(ct)));
 api.MapPost("/scheduler/scan",
     async (
+        HttpContext context,
         JobSourceFetcherFactory sourceFetcherFactory,
         CancellationToken ct) =>
-        Results.Ok(await store.ScanAsync(
+    {
+        var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+        if (user is null) return Results.Unauthorized();
+        return Results.Ok(await store.ScanAsync(
+            user.Id,
             (await store.GetSourcesAsync(ct))
                 .Select(source => source.Id)
                 .ToArray(),
             sourceFetcherFactory,
-            ct)));
+            ct));
+    });
 
 app.Run();
 
@@ -211,11 +227,8 @@ public record CompanyInput(string Name, string Domain);
 public record CompanyUpdate(string? Name, string? Domain, bool? Enabled);
 public record JobSource(string Id, string CompanyId, string CompanyName, string Name, string Type, string Url, bool Enabled, string Status, string LastFetch, int JobsFetched, int FailureCount, string? LastError, string? BoardToken);
 public record SourceInput(string CompanyId, string Name, string Type, string Url, string? BoardToken = null);
-public record SourceUpdate(
-    string? Name,
-    string? Url,
-    bool? Enabled,
-    string? BoardToken);public record Job(string Id, string CompanyId, string SourceId, string Company, string Title, string Description, string Location, string WorkplaceType, string Department, string EmploymentType, string PostedDate, string FirstSeenAt, string ApplicationUrl, string SourceUrl, int Score, bool IsMatch, bool Notified, string[] MatchedSkills, string[] MissingSkills, Breakdown Breakdown);
+public record SourceUpdate(string? Name, string? Url, bool? Enabled, string? BoardToken);
+public record Job(string Id, string CompanyId, string SourceId, string Company, string Title, string Description, string Location, string WorkplaceType, string Department, string EmploymentType, string PostedDate, string FirstSeenAt, string ApplicationUrl, string SourceUrl, int Score, bool IsMatch, bool Notified, string[] MatchedSkills, string[] MissingSkills, Breakdown Breakdown);
 public record Breakdown(int Role, int Skills, int Experience, int Location, int AiRelevance, int Freshness);
 public record Profile(string Id, string[] Roles, string[] Skills, string[] Technologies, int MinYears, int MaxYears, string[] Locations, string WorkplacePreference, string[] IncludeKeywords, string[] ExcludeKeywords, string Email);
 public record ProfileInput(string[] Roles, string[] Skills, string[] Technologies, int MinYears, int MaxYears, string[] Locations, string WorkplacePreference, string[] IncludeKeywords, string[] ExcludeKeywords, string Email);
