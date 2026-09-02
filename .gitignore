@@ -50,3 +50,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+.env
+artifacts/job-radar/.env
+artifacts/job-radar/.env.example
