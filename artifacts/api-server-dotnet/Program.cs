@@ -5,7 +5,6 @@ using JobRadar.Api.Sources.Deloitte;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Diagnostics;
-using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.AddSimpleConsole(options =>
@@ -20,18 +19,18 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 
 var supabaseUrl = builder.Configuration["SUPABASE_URL"]
     ?? Environment.GetEnvironmentVariable("SUPABASE_URL");
-var supabaseJwtSecret = builder.Configuration["SUPABASE_JWT_SECRET"]
-    ?? Environment.GetEnvironmentVariable("SUPABASE_JWT_SECRET");
 var adminEmail = builder.Configuration["JOBRADAR_ADMIN_EMAIL"]
     ?? Environment.GetEnvironmentVariable("JOBRADAR_ADMIN_EMAIL");
 
-if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(supabaseJwtSecret))
-    throw new InvalidOperationException("SUPABASE_URL and SUPABASE_JWT_SECRET must be configured.");
+if (string.IsNullOrWhiteSpace(supabaseUrl))
+    throw new InvalidOperationException("SUPABASE_URL must be configured.");
 
 var supabaseIssuer = $"{supabaseUrl.TrimEnd('/')}/auth/v1";
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.Authority = supabaseIssuer;
+        options.MetadataAddress = $"{supabaseIssuer}/.well-known/openid-configuration";
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -40,7 +39,6 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = "authenticated",
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(supabaseJwtSecret)),
             ClockSkew = TimeSpan.FromSeconds(30),
         };
     });
