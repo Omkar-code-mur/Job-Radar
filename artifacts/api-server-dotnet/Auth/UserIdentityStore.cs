@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Npgsql;
 
 namespace JobRadar.Api.Auth;
