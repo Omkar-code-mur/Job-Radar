@@ -2,8 +2,7 @@ using JobRadar.Api.Auth;
 using JobRadar.Api.Sources;
 using JobRadar.Api.Sources.Greenhouse;
 using JobRadar.Api.Sources.Deloitte;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Authentication;
 using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,39 +18,26 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 
 var supabaseUrl = builder.Configuration["SUPABASE_URL"]
     ?? Environment.GetEnvironmentVariable("SUPABASE_URL");
+var supabaseKey = builder.Configuration["SUPABASE_ANON_KEY"]
+    ?? builder.Configuration["SUPABASE_PUBLISHABLE_KEY"]
+    ?? Environment.GetEnvironmentVariable("SUPABASE_ANON_KEY")
+    ?? Environment.GetEnvironmentVariable("SUPABASE_PUBLISHABLE_KEY");
 var adminEmail = builder.Configuration["JOBRADAR_ADMIN_EMAIL"]
     ?? Environment.GetEnvironmentVariable("JOBRADAR_ADMIN_EMAIL");
 
 if (string.IsNullOrWhiteSpace(supabaseUrl))
     throw new InvalidOperationException("SUPABASE_URL must be configured.");
+if (string.IsNullOrWhiteSpace(supabaseKey))
+    throw new InvalidOperationException("SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY must be configured.");
 
-var supabaseIssuer = $"{supabaseUrl.TrimEnd('/')}/auth/v1";
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.Authority = supabaseIssuer;
-        options.MetadataAddress = $"{supabaseIssuer}/.well-known/openid-configuration";
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = supabaseIssuer,
-            ValidateAudience = true,
-            ValidAudience = "authenticated",
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ClockSkew = TimeSpan.FromSeconds(30),
-        };
-        options.Events = new JwtBearerEvents
-        {
-            OnAuthenticationFailed = context =>
-            {
-                Console.WriteLine($"JWT AUTH FAILED: {context.Exception}");
-                return Task.CompletedTask;
-            }
-        };
-    });
+builder.Services.AddAuthentication("Supabase")
+    .AddScheme<AuthenticationSchemeOptions, SupabaseAuthenticationHandler>("Supabase", _ => { });
 builder.Services.AddAuthorization();
 
+builder.Services.AddHttpClient("SupabaseAuth", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
 builder.Services.AddHttpClient<GreenhouseJobSource>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);
