@@ -1,7 +1,11 @@
+using JobRadar.Api.Auth;
 using JobRadar.Api.Sources;
 using JobRadar.Api.Sources.Greenhouse;
 using JobRadar.Api.Sources.Deloitte;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using System.Diagnostics;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.AddSimpleConsole(options =>
@@ -13,6 +17,35 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+
+var supabaseUrl = builder.Configuration["SUPABASE_URL"]
+    ?? Environment.GetEnvironmentVariable("SUPABASE_URL");
+var supabaseJwtSecret = builder.Configuration["SUPABASE_JWT_SECRET"]
+    ?? Environment.GetEnvironmentVariable("SUPABASE_JWT_SECRET");
+var adminEmail = builder.Configuration["JOBRADAR_ADMIN_EMAIL"]
+    ?? Environment.GetEnvironmentVariable("JOBRADAR_ADMIN_EMAIL");
+
+if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(supabaseJwtSecret))
+    throw new InvalidOperationException("SUPABASE_URL and SUPABASE_JWT_SECRET must be configured.");
+
+var supabaseIssuer = $"{supabaseUrl.TrimEnd('/')}/auth/v1";
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = supabaseIssuer,
+            ValidateAudience = true,
+            ValidAudience = "authenticated",
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(supabaseJwtSecret)),
+            ClockSkew = TimeSpan.FromSeconds(30),
+        };
+    });
+builder.Services.AddAuthorization();
+
 builder.Services.AddHttpClient<GreenhouseJobSource>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);
@@ -25,16 +58,23 @@ builder.Services.AddHttpClient<DeloitteUsiJobSource>(client =>
 });
 builder.Services.AddScoped<IJobSourceFetcher, GreenhouseJobSource>();
 builder.Services.AddScoped<IJobSourceFetcher, DeloitteUsiJobSource>();
-
 builder.Services.AddScoped<JobSourceFetcherFactory>();
+
 var connectionString = builder.Configuration["ConnectionStrings:DefaultConnection"]
     ?? builder.Configuration["DATABASE_URL"]
     ?? Environment.GetEnvironmentVariable("DATABASE_URL");
-var store = new PostgresJobRadarStore(connectionString ?? string.Empty);
+if (string.IsNullOrWhiteSpace(connectionString))
+    throw new InvalidOperationException("DATABASE_URL must be configured.");
+
+var store = new PostgresJobRadarStore(connectionString);
+var userIdentityStore = new UserIdentityStore(connectionString);
 await store.InitializeAsync();
+await userIdentityStore.InitializeAsync();
 
 var app = builder.Build();
 app.UseCors();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.Use(async (context, next) =>
 {
@@ -82,40 +122,52 @@ app.Use(async (context, next) =>
         }
     }
 });
+
 app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
-app.MapGet("/api/dashboard", async (CancellationToken ct) => Results.Ok(await store.DashboardAsync(ct)));
-app.MapGet("/api/companies", async (CancellationToken ct) => Results.Ok(await store.GetCompaniesAsync(ct)));
-app.MapPost("/api/companies", async (CompanyInput input, CancellationToken ct) =>
+
+var api = app.MapGroup("/api").RequireAuthorization();
+
+api.MapGet("/auth/me", async (HttpContext context, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    return user is null
+        ? Results.Unauthorized()
+        : Results.Ok(user);
+});
+
+api.MapGet("/dashboard", async (CancellationToken ct) => Results.Ok(await store.DashboardAsync(ct)));
+api.MapGet("/companies", async (CancellationToken ct) => Results.Ok(await store.GetCompaniesAsync(ct)));
+api.MapPost("/companies", async (CompanyInput input, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Domain))
         return Results.BadRequest(new { error = "Company name and domain are required." });
     var company = await store.AddCompanyAsync(input, ct);
     return Results.Created($"/api/companies/{company.Id}", company);
 });
-app.MapPatch("/api/companies/{id}", async (string id, CompanyUpdate input, CancellationToken ct) =>
+api.MapPatch("/companies/{id}", async (string id, CompanyUpdate input, CancellationToken ct) =>
 {
     var company = await store.UpdateCompanyAsync(id, input, ct);
     return company is null ? Results.NotFound(new { error = "Company not found." }) : Results.Ok(company);
 });
-app.MapDelete("/api/companies/{id}", async (string id, CancellationToken ct) =>
+api.MapDelete("/companies/{id}", async (string id, CancellationToken ct) =>
     await store.DeleteCompanyAsync(id, ct) ? Results.NoContent() : Results.NotFound(new { error = "Company not found." }));
 
-app.MapGet("/api/sources", async (CancellationToken ct) => Results.Ok(await store.GetSourcesAsync(ct)));
-app.MapPost("/api/sources", async (SourceInput input, CancellationToken ct) =>
+api.MapGet("/sources", async (CancellationToken ct) => Results.Ok(await store.GetSourcesAsync(ct)));
+api.MapPost("/sources", async (SourceInput input, CancellationToken ct) =>
 {
     var source = await store.AddSourceAsync(input, ct);
     return source is null
         ? Results.BadRequest(new { error = "Company, source name, type, and URL are required." })
         : Results.Created($"/api/sources/{source.Id}", source);
 });
-app.MapPatch("/api/sources/{id}", async (string id, SourceUpdate input, CancellationToken ct) =>
+api.MapPatch("/sources/{id}", async (string id, SourceUpdate input, CancellationToken ct) =>
 {
     var source = await store.UpdateSourceAsync(id, input, ct);
     return source is null ? Results.NotFound(new { error = "Source not found." }) : Results.Ok(source);
 });
-app.MapDelete("/api/sources/{id}", async (string id, CancellationToken ct) =>
+api.MapDelete("/sources/{id}", async (string id, CancellationToken ct) =>
     await store.DeleteSourceAsync(id, ct) ? Results.NoContent() : Results.NotFound(new { error = "Source not found." }));
-app.MapPost("/api/sources/{id}/scan",
+api.MapPost("/sources/{id}/scan",
     async (
         string id,
         JobSourceFetcherFactory sourceFetcherFactory,
@@ -124,17 +176,17 @@ app.MapPost("/api/sources/{id}/scan",
             [id],
             sourceFetcherFactory,
             ct)));
-app.MapGet("/api/jobs", async (string? search, string? status, string? location, string? workplaceType, CancellationToken ct) =>
+api.MapGet("/jobs", async (string? search, string? status, string? location, string? workplaceType, CancellationToken ct) =>
     Results.Ok(await store.GetJobsAsync(search, status, location, workplaceType, ct)));
-app.MapGet("/api/jobs/{id}", async (string id, CancellationToken ct) =>
+api.MapGet("/jobs/{id}", async (string id, CancellationToken ct) =>
 {
     var job = await store.GetJobAsync(id, ct);
     return job is null ? Results.NotFound(new { error = "Job not found." }) : Results.Ok(job);
 });
-app.MapGet("/api/profile", async (CancellationToken ct) => Results.Ok(await store.GetProfileAsync(ct)));
-app.MapPut("/api/profile", async (ProfileInput input, CancellationToken ct) => Results.Ok(await store.SaveProfileAsync(input, ct)));
-app.MapGet("/api/matching", async (CancellationToken ct) => Results.Ok(await store.GetMatchingAsync(ct)));
-app.MapPut("/api/matching", async (MatchingConfiguration input, CancellationToken ct) =>
+api.MapGet("/profile", async (CancellationToken ct) => Results.Ok(await store.GetProfileAsync(ct)));
+api.MapPut("/profile", async (ProfileInput input, CancellationToken ct) => Results.Ok(await store.SaveProfileAsync(input, ct)));
+api.MapGet("/matching", async (CancellationToken ct) => Results.Ok(await store.GetMatchingAsync(ct)));
+api.MapPut("/matching", async (MatchingConfiguration input, CancellationToken ct) =>
 {
     var total = input.RoleWeight + input.SkillsWeight + input.ExperienceWeight + input.LocationWeight + input.AiWeight + input.FreshnessWeight;
     if (input.Threshold is < 0 or > 100 || total != 100)
@@ -142,8 +194,8 @@ app.MapPut("/api/matching", async (MatchingConfiguration input, CancellationToke
     await store.SaveMatchingAsync(input, ct);
     return Results.Ok(input);
 });
-app.MapGet("/api/notifications", async (CancellationToken ct) => Results.Ok(await store.GetNotificationsAsync(ct)));
-app.MapPost("/api/scheduler/scan",
+api.MapGet("/notifications", async (CancellationToken ct) => Results.Ok(await store.GetNotificationsAsync(ct)));
+api.MapPost("/scheduler/scan",
     async (
         JobSourceFetcherFactory sourceFetcherFactory,
         CancellationToken ct) =>
@@ -153,6 +205,7 @@ app.MapPost("/api/scheduler/scan",
                 .ToArray(),
             sourceFetcherFactory,
             ct)));
+
 app.Run();
 
 public record Company(string Id, string Name, string Domain, string Initials, string Color, bool Enabled, int SourceCount, int JobCount, string CreatedAt);
