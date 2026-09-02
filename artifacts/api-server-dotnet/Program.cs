@@ -66,8 +66,8 @@ if (string.IsNullOrWhiteSpace(connectionString))
 
 var store = new PostgresJobRadarStore(connectionString);
 var userIdentityStore = new UserIdentityStore(connectionString);
-await store.InitializeAsync();
 await userIdentityStore.InitializeAsync();
+await store.InitializeAsync();
 
 var app = builder.Build();
 app.UseCors();
@@ -168,12 +168,14 @@ api.MapDelete("/sources/{id}", async (string id, CancellationToken ct) =>
 api.MapPost("/sources/{id}/scan",
     async (
         string id,
+        HttpContext context,
         JobSourceFetcherFactory sourceFetcherFactory,
         CancellationToken ct) =>
-        Results.Ok(await store.ScanAsync(
-            [id],
-            sourceFetcherFactory,
-            ct)));
+    {
+        var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+        if (user is null) return Results.Unauthorized();
+        return Results.Ok(await store.ScanAsync(user.Id, [id], sourceFetcherFactory, ct));
+    });
 api.MapGet("/jobs", async (string? search, string? status, string? location, string? workplaceType, CancellationToken ct) =>
     Results.Ok(await store.GetJobsAsync(search, status, location, workplaceType, ct)));
 api.MapGet("/jobs/{id}", async (string id, CancellationToken ct) =>
@@ -181,28 +183,48 @@ api.MapGet("/jobs/{id}", async (string id, CancellationToken ct) =>
     var job = await store.GetJobAsync(id, ct);
     return job is null ? Results.NotFound(new { error = "Job not found." }) : Results.Ok(job);
 });
-api.MapGet("/profile", async (CancellationToken ct) => Results.Ok(await store.GetProfileAsync(ct)));
-api.MapPut("/profile", async (ProfileInput input, CancellationToken ct) => Results.Ok(await store.SaveProfileAsync(input, ct)));
-api.MapGet("/matching", async (CancellationToken ct) => Results.Ok(await store.GetMatchingAsync(ct)));
-api.MapPut("/matching", async (MatchingConfiguration input, CancellationToken ct) =>
+api.MapGet("/profile", async (HttpContext context, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    return user is null ? Results.Unauthorized() : Results.Ok(await store.GetProfileAsync(user.Id, ct));
+});
+api.MapPut("/profile", async (HttpContext context, ProfileInput input, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    return user is null ? Results.Unauthorized() : Results.Ok(await store.SaveProfileAsync(user.Id, input, ct));
+});
+api.MapGet("/matching", async (HttpContext context, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    return user is null ? Results.Unauthorized() : Results.Ok(await store.GetMatchingAsync(user.Id, ct));
+});
+api.MapPut("/matching", async (HttpContext context, MatchingConfiguration input, CancellationToken ct) =>
 {
     var total = input.RoleWeight + input.SkillsWeight + input.ExperienceWeight + input.LocationWeight + input.AiWeight + input.FreshnessWeight;
     if (input.Threshold is < 0 or > 100 || total != 100)
         return Results.BadRequest(new { error = "Scoring weights must total 100." });
-    await store.SaveMatchingAsync(input, ct);
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    if (user is null) return Results.Unauthorized();
+    await store.SaveMatchingAsync(user.Id, input, ct);
     return Results.Ok(input);
 });
 api.MapGet("/notifications", async (CancellationToken ct) => Results.Ok(await store.GetNotificationsAsync(ct)));
 api.MapPost("/scheduler/scan",
     async (
+        HttpContext context,
         JobSourceFetcherFactory sourceFetcherFactory,
         CancellationToken ct) =>
-        Results.Ok(await store.ScanAsync(
+    {
+        var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+        if (user is null) return Results.Unauthorized();
+        return Results.Ok(await store.ScanAsync(
+            user.Id,
             (await store.GetSourcesAsync(ct))
                 .Select(source => source.Id)
                 .ToArray(),
             sourceFetcherFactory,
-            ct)));
+            ct));
+    });
 
 app.Run();
 
@@ -211,11 +233,8 @@ public record CompanyInput(string Name, string Domain);
 public record CompanyUpdate(string? Name, string? Domain, bool? Enabled);
 public record JobSource(string Id, string CompanyId, string CompanyName, string Name, string Type, string Url, bool Enabled, string Status, string LastFetch, int JobsFetched, int FailureCount, string? LastError, string? BoardToken);
 public record SourceInput(string CompanyId, string Name, string Type, string Url, string? BoardToken = null);
-public record SourceUpdate(
-    string? Name,
-    string? Url,
-    bool? Enabled,
-    string? BoardToken);public record Job(string Id, string CompanyId, string SourceId, string Company, string Title, string Description, string Location, string WorkplaceType, string Department, string EmploymentType, string PostedDate, string FirstSeenAt, string ApplicationUrl, string SourceUrl, int Score, bool IsMatch, bool Notified, string[] MatchedSkills, string[] MissingSkills, Breakdown Breakdown);
+public record SourceUpdate(string? Name, string? Url, bool? Enabled, string? BoardToken);
+public record Job(string Id, string CompanyId, string SourceId, string Company, string Title, string Description, string Location, string WorkplaceType, string Department, string EmploymentType, string PostedDate, string FirstSeenAt, string ApplicationUrl, string SourceUrl, int Score, bool IsMatch, bool Notified, string[] MatchedSkills, string[] MissingSkills, Breakdown Breakdown);
 public record Breakdown(int Role, int Skills, int Experience, int Location, int AiRelevance, int Freshness);
 public record Profile(string Id, string[] Roles, string[] Skills, string[] Technologies, int MinYears, int MaxYears, string[] Locations, string WorkplacePreference, string[] IncludeKeywords, string[] ExcludeKeywords, string Email);
 public record ProfileInput(string[] Roles, string[] Skills, string[] Technologies, int MinYears, int MaxYears, string[] Locations, string WorkplacePreference, string[] IncludeKeywords, string[] ExcludeKeywords, string Email);
