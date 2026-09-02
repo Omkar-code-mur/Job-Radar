@@ -54,7 +54,11 @@ public sealed class SupabaseAuthenticationHandler : AuthenticationHandler<Authen
                 return AuthenticateResult.Fail("Supabase access token is invalid or expired.");
 
             await using var stream = await response.Content.ReadAsStreamAsync(Context.RequestAborted);
-            var user = await JsonSerializer.DeserializeAsync<SupabaseUser>(stream, cancellationToken: Context.RequestAborted);
+            var user = await JsonSerializer.DeserializeAsync<SupabaseUser>(
+                stream,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+                Context.RequestAborted);
+
             if (user is null || !Guid.TryParse(user.Id, out var userId) || string.IsNullOrWhiteSpace(user.Email))
                 return AuthenticateResult.Fail("Supabase user response is missing required identity claims.");
 
