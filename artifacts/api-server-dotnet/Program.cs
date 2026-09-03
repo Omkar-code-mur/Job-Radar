@@ -65,7 +65,6 @@ var userIdentityStore = new UserIdentityStore(connectionString);
 await userIdentityStore.InitializeAsync();
 await store.InitializeAsync();
 await workspaceStore.InitializeAsync();
-await VerifiedSourceSeeder.SeedAsync(connectionString);
 
 var app = builder.Build();
 app.UseCors();
@@ -122,6 +121,16 @@ app.Use(async (context, next) =>
 app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 
 var api = app.MapGroup("/api").RequireAuthorization();
+var monitorableSourceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+{
+    "GREENHOUSE_API",
+    "DELOITTE_USI"
+};
+
+bool IsMonitorableSource(JobSource source) =>
+    source.Enabled &&
+    source.Status == "healthy" &&
+    monitorableSourceTypes.Contains(source.Type);
 
 api.MapGet("/auth/me", async (HttpContext context, CancellationToken ct) =>
 {
@@ -147,7 +156,7 @@ api.MapGet("/companies", async (HttpContext context, CancellationToken ct) =>
 
     var sources = await store.GetSourcesAsync(ct);
     var monitorableCompanyIds = sources
-        .Where(source => source.Enabled && source.Status == "healthy")
+        .Where(IsMonitorableSource)
         .Select(source => source.CompanyId)
         .ToHashSet(StringComparer.Ordinal);
 
@@ -281,7 +290,7 @@ api.MapGet("/dream-companies", async (HttpContext context, CancellationToken ct)
 
     var sources = await store.GetSourcesAsync(ct);
     var monitorableCompanyIds = sources
-        .Where(source => source.Enabled && source.Status == "healthy")
+        .Where(IsMonitorableSource)
         .Select(source => source.CompanyId)
         .ToHashSet(StringComparer.Ordinal);
 
@@ -293,7 +302,7 @@ api.MapPost("/dream-companies/{companyId}", async (HttpContext context, string c
     if (user is null) return Results.Unauthorized();
 
     var sources = await store.GetSourcesAsync(ct);
-    if (!sources.Any(source => source.CompanyId == companyId && source.Enabled && source.Status == "healthy"))
+    if (!sources.Any(source => source.CompanyId == companyId && IsMonitorableSource(source)))
         return Results.BadRequest(new { error = "This company is not currently monitorable by Job Radar." });
 
     await workspaceStore.AddDreamCompanyAsync(user.Id, companyId, ct);
