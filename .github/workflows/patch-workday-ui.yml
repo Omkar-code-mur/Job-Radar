@@ -1,0 +1,42 @@
+name: Patch Workday UI
+
+on:
+  push:
+    branches:
+      - feat/source-synechron
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(ui): expose Workday connector') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/source-synechron
+          fetch-depth: 0
+
+      - name: Add Workday connector option
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('artifacts/job-radar/src/App.tsx')
+          text = path.read_text(encoding='utf-8')
+          needle = '''              <option value="DELOITTE_USI">\n                Deloitte USI careers\n              </option>\n\n              <option value="LEVER_API">'''
+          replacement = '''              <option value="DELOITTE_USI">\n                Deloitte USI careers\n              </option>\n\n              <option value="WORKDAY_API">\n                Workday API\n              </option>\n\n              <option value="LEVER_API">'''
+          if 'value="WORKDAY_API"' not in text:
+              if needle not in text:
+                  raise SystemExit('Expected connector options block was not found')
+              text = text.replace(needle, replacement, 1)
+              path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit UI change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts/job-radar/src/App.tsx
+          git diff --cached --quiet || git commit -m "chore(ui): expose Workday connector"
+          git push origin feat/source-synechron
