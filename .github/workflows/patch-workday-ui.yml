@@ -1,4 +1,4 @@
-name: Patch Workday UI
+name: Patch Workday integration
 
 on:
   push:
@@ -17,29 +17,38 @@ jobs:
           ref: feat/source-synechron
           fetch-depth: 0
 
-      - name: Add Workday connector option
+      - name: Patch Workday registrations
         run: |
           python - <<'PY'
           from pathlib import Path
-          path = Path('artifacts/job-radar/src/App.tsx')
-          text = path.read_text(encoding='utf-8')
-          needle = '''              <option value="DELOITTE_USI">\n                Deloitte USI careers\n              </option>\n\n              <option value="LEVER_API">'''
-          replacement = '''              <option value="DELOITTE_USI">\n                Deloitte USI careers\n              </option>\n\n              <option value="WORKDAY_API">\n                Workday API\n              </option>\n\n              <option value="LEVER_API">'''
+
+          app = Path('artifacts/job-radar/src/App.tsx')
+          text = app.read_text(encoding='utf-8')
           if 'value="WORKDAY_API"' not in text:
+              needle = '''              <option value="DELOITTE_USI">\n                Deloitte USI careers\n              </option>\n\n              <option value="LEVER_API">'''
+              replacement = '''              <option value="DELOITTE_USI">\n                Deloitte USI careers\n              </option>\n\n              <option value="WORKDAY_API">\n                Workday API\n              </option>\n\n              <option value="LEVER_API">'''
               if needle not in text:
-                  raise SystemExit('Expected connector options block was not found')
-              text = text.replace(needle, replacement, 1)
-              path.write_text(text, encoding='utf-8')
+                  raise SystemExit('Expected App.tsx connector block was not found')
+              app.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
+
+          program = Path('artifacts/api-server-dotnet/Program.cs')
+          text = program.read_text(encoding='utf-8')
+          needle = '''    "GREENHOUSE_API",\n    "DELOITTE_USI"\n};'''
+          replacement = '''    "GREENHOUSE_API",\n    "DELOITTE_USI",\n    "WORKDAY_API"\n};'''
+          if '"WORKDAY_API"' not in text:
+              if needle not in text:
+                  raise SystemExit('Expected Program.cs monitorable source block was not found')
+              program.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
           PY
 
-      - name: Commit UI change
+      - name: Commit patches
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add artifacts/job-radar/src/App.tsx
+          git add artifacts/job-radar/src/App.tsx artifacts/api-server-dotnet/Program.cs
           if git diff --cached --quiet; then
-            echo "Workday connector already present"
+            echo "Workday registrations already present"
             exit 0
           fi
-          git commit -m "chore(ui): expose Workday connector"
+          git commit -m "fix(workday): expose connector and monitorable source"
           git push origin feat/source-synechron
