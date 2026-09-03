@@ -121,6 +121,16 @@ app.Use(async (context, next) =>
 app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 
 var api = app.MapGroup("/api").RequireAuthorization();
+var monitorableSourceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+{
+    "GREENHOUSE_API",
+    "DELOITTE_USI"
+};
+
+bool IsMonitorableSource(JobSource source) =>
+    source.Enabled &&
+    source.Status == "healthy" &&
+    monitorableSourceTypes.Contains(source.Type);
 
 api.MapGet("/auth/me", async (HttpContext context, CancellationToken ct) =>
 {
@@ -136,7 +146,22 @@ api.MapGet("/dashboard", async (HttpContext context, CancellationToken ct) =>
     return user is null ? Results.Unauthorized() : Results.Ok(await store.DashboardAsync(user.Id, ct));
 });
 
-api.MapGet("/companies", async (CancellationToken ct) => Results.Ok(await store.GetCompaniesAsync(ct)));
+api.MapGet("/companies", async (HttpContext context, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    if (user is null) return Results.Unauthorized();
+
+    var companies = await store.GetCompaniesAsync(ct);
+    if (user.Role == "ADMIN") return Results.Ok(companies);
+
+    var sources = await store.GetSourcesAsync(ct);
+    var monitorableCompanyIds = sources
+        .Where(IsMonitorableSource)
+        .Select(source => source.CompanyId)
+        .ToHashSet(StringComparer.Ordinal);
+
+    return Results.Ok(companies.Where(company => monitorableCompanyIds.Contains(company.Id)));
+});
 api.MapPost("/companies", async (HttpContext context, CompanyInput input, CancellationToken ct) =>
 {
     var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
@@ -258,12 +283,28 @@ api.MapPut("/applications/{jobId}", async (HttpContext context, string jobId, Ap
 api.MapGet("/dream-companies", async (HttpContext context, CancellationToken ct) =>
 {
     var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
-    return user is null ? Results.Unauthorized() : Results.Ok(await workspaceStore.GetDreamCompaniesAsync(user.Id, ct));
+    if (user is null) return Results.Unauthorized();
+
+    var dreamCompanies = await workspaceStore.GetDreamCompaniesAsync(user.Id, ct);
+    if (user.Role == "ADMIN") return Results.Ok(dreamCompanies);
+
+    var sources = await store.GetSourcesAsync(ct);
+    var monitorableCompanyIds = sources
+        .Where(IsMonitorableSource)
+        .Select(source => source.CompanyId)
+        .ToHashSet(StringComparer.Ordinal);
+
+    return Results.Ok(dreamCompanies.Where(company => monitorableCompanyIds.Contains(company.Id)));
 });
 api.MapPost("/dream-companies/{companyId}", async (HttpContext context, string companyId, CancellationToken ct) =>
 {
     var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
     if (user is null) return Results.Unauthorized();
+
+    var sources = await store.GetSourcesAsync(ct);
+    if (!sources.Any(source => source.CompanyId == companyId && IsMonitorableSource(source)))
+        return Results.BadRequest(new { error = "This company is not currently monitorable by Job Radar." });
+
     await workspaceStore.AddDreamCompanyAsync(user.Id, companyId, ct);
     return Results.NoContent();
 });
