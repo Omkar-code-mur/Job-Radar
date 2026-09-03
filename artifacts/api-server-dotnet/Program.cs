@@ -58,7 +58,8 @@ var connectionString = builder.Configuration["ConnectionStrings:DefaultConnectio
 if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("DATABASE_URL must be configured.");
 
-var store = new PostgresJobRadarStore(connectionString);
+var baseStore = new PostgresJobRadarStore(connectionString);
+var store = new UserScopedJobRadarStore(baseStore, connectionString);
 var userIdentityStore = new UserIdentityStore(connectionString);
 await userIdentityStore.InitializeAsync();
 await store.InitializeAsync();
@@ -127,7 +128,11 @@ api.MapGet("/auth/me", async (HttpContext context, CancellationToken ct) =>
         : Results.Ok(user);
 });
 
-api.MapGet("/dashboard", async (CancellationToken ct) => Results.Ok(await store.DashboardAsync(ct)));
+api.MapGet("/dashboard", async (HttpContext context, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    return user is null ? Results.Unauthorized() : Results.Ok(await store.DashboardAsync(user.Id, ct));
+});
 api.MapGet("/companies", async (CancellationToken ct) => Results.Ok(await store.GetCompaniesAsync(ct)));
 api.MapPost("/companies", async (CompanyInput input, CancellationToken ct) =>
 {
@@ -170,11 +175,18 @@ api.MapPost("/sources/{id}/scan",
         if (user is null) return Results.Unauthorized();
         return Results.Ok(await store.ScanAsync(user.Id, [id], sourceFetcherFactory, ct));
     });
-api.MapGet("/jobs", async (string? search, string? status, string? location, string? workplaceType, CancellationToken ct) =>
-    Results.Ok(await store.GetJobsAsync(search, status, location, workplaceType, ct)));
-api.MapGet("/jobs/{id}", async (string id, CancellationToken ct) =>
+api.MapGet("/jobs", async (HttpContext context, string? search, string? status, string? location, string? workplaceType, CancellationToken ct) =>
 {
-    var job = await store.GetJobAsync(id, ct);
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    return user is null
+        ? Results.Unauthorized()
+        : Results.Ok(await store.GetJobsAsync(user.Id, search, status, location, workplaceType, ct));
+});
+api.MapGet("/jobs/{id}", async (HttpContext context, string id, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    if (user is null) return Results.Unauthorized();
+    var job = await store.GetJobAsync(user.Id, id, ct);
     return job is null ? Results.NotFound(new { error = "Job not found." }) : Results.Ok(job);
 });
 api.MapGet("/profile", async (HttpContext context, CancellationToken ct) =>
