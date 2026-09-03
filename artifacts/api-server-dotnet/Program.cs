@@ -131,7 +131,8 @@ var api = app.MapGroup("/api").RequireAuthorization();
 var monitorableSourceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 {
     "GREENHOUSE_API",
-    "DELOITTE_USI"
+    "DELOITTE_USI",
+    "WORKDAY_API"
 };
 
 bool IsMonitorableSource(JobSource source) =>
