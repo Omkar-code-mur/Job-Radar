@@ -117,9 +117,14 @@ public sealed class UserWorkspaceStore
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(ct);
         const string sql = """
-            select c.id, c.name, c.domain, c.initials, c.color, c.enabled, c.source_count, c.job_count, c.created_at
-            from dream_companies d join companies c on c.id = d.company_id
-            where d.user_id = @user_id order by c.name;
+            select c.id, c.name, c.domain, c.initials, c.color, c.enabled,
+                   (select count(*)::int from sources s where s.company_id = c.id) as source_count,
+                   (select count(*)::int from jobs j where j.company_id = c.id) as job_count,
+                   c.created_at
+            from dream_companies d
+            join companies c on c.id = d.company_id
+            where d.user_id = @user_id
+            order by c.name;
             """;
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("user_id", userId);
