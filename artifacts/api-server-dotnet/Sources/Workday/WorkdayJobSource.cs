@@ -11,7 +11,9 @@ public sealed class WorkdayJobSource(
 {
     public string SourceType => "WORKDAY_API";
 
-    private const int PageSize = 50;
+    // Workday CXS career sites commonly accept 20 results per request.
+    // Keep this conservative because the endpoint is public but undocumented.
+    private const int PageSize = 20;
     private const int MaxPages = 20;
 
     public async Task<IReadOnlyList<Job>> FetchAsync(
@@ -43,10 +45,22 @@ public sealed class WorkdayJobSource(
                 string.Empty);
 
             using var response = await httpClient.PostAsJsonAsync(endpoint, request, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
-            var payload = await response.Content.ReadFromJsonAsync<WorkdayJobsResponse>(
-                cancellationToken: cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogError(
+                    "Workday source {SourceId} returned HTTP {StatusCode}: {ResponseBody}",
+                    source.Id,
+                    (int)response.StatusCode,
+                    responseBody.Length > 2000 ? responseBody[..2000] : responseBody);
+
+                throw new HttpRequestException(
+                    $"Workday CXS returned {(int)response.StatusCode} ({response.StatusCode}). " +
+                    (string.IsNullOrWhiteSpace(responseBody) ? "The response body was empty." : responseBody));
+            }
+
+            var payload = JsonSerializer.Deserialize<WorkdayJobsResponse>(responseBody);
 
             if (payload?.JobPostings is null || payload.JobPostings.Count == 0)
             {
@@ -139,7 +153,8 @@ public sealed class WorkdayJobSource(
 
     private static string SanitizeId(string value)
     {
-        return new string(value.Where(char.IsLetterOrDigit).ToArray());
+        var sanitized = new string(value.Where(char.IsLetterOrDigit).ToArray());
+        return string.IsNullOrWhiteSpace(sanitized) ? "unknown" : sanitized;
     }
 }
 
