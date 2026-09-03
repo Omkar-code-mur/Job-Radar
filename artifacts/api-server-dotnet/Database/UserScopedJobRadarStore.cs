@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using JobRadar.Api.Sources;
 
 public sealed class UserScopedJobRadarStore
 {
