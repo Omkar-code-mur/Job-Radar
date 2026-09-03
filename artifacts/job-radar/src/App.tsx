@@ -365,6 +365,10 @@ function SourceModal({
                 Deloitte USI careers
               </option>
 
+              <option value="WORKDAY_API">
+                Workday API
+              </option>
+
               <option value="LEVER_API">
                 Lever API
               </option>
