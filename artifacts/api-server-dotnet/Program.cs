@@ -2,6 +2,7 @@ using JobRadar.Api.Auth;
 using JobRadar.Api.Sources;
 using JobRadar.Api.Sources.Greenhouse;
 using JobRadar.Api.Sources.Deloitte;
+using JobRadar.Api.Sources.Workday;
 using Microsoft.AspNetCore.Authentication;
 using System.Diagnostics;
 
@@ -48,8 +49,14 @@ builder.Services.AddHttpClient<DeloitteUsiJobSource>(client =>
     client.Timeout = TimeSpan.FromSeconds(20);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; JobRadar/1.0; public-job-monitor)");
 });
+builder.Services.AddHttpClient<WorkdayJobSource>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("JobRadar/1.0 public-job-monitor");
+});
 builder.Services.AddScoped<IJobSourceFetcher, GreenhouseJobSource>();
 builder.Services.AddScoped<IJobSourceFetcher, DeloitteUsiJobSource>();
+builder.Services.AddScoped<IJobSourceFetcher, WorkdayJobSource>();
 builder.Services.AddScoped<JobSourceFetcherFactory>();
 
 var connectionString = builder.Configuration["ConnectionStrings:DefaultConnection"]
@@ -124,7 +131,8 @@ var api = app.MapGroup("/api").RequireAuthorization();
 var monitorableSourceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 {
     "GREENHOUSE_API",
-    "DELOITTE_USI"
+    "DELOITTE_USI",
+    "WORKDAY_API"
 };
 
 bool IsMonitorableSource(JobSource source) =>
