@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using JobRadar.Api.Sources;
@@ -11,8 +12,7 @@ public sealed class WorkdayJobSource(
 {
     public string SourceType => "WORKDAY_API";
 
-    // Workday CXS career sites commonly accept 20 results per request.
-    // Keep this conservative because the endpoint is public but undocumented.
+    // Workday CXS career sites use 20 results per request.
     private const int PageSize = 20;
     private const int MaxPages = 20;
 
@@ -28,6 +28,7 @@ public sealed class WorkdayJobSource(
         var now = DateTimeOffset.UtcNow;
         var jobs = new List<Job>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int? totalJobs = null;
 
         logger.LogInformation(
             "Starting Workday CXS fetch for source {SourceId} from {Endpoint}",
@@ -44,7 +45,14 @@ public sealed class WorkdayJobSource(
                 page * PageSize,
                 string.Empty);
 
-            using var response = await httpClient.PostAsJsonAsync(endpoint, request, cancellationToken);
+            using var message = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = JsonContent.Create(request)
+            };
+            message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            message.Headers.AcceptLanguage.ParseAdd("en-US");
+
+            using var response = await httpClient.SendAsync(message, cancellationToken);
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -56,13 +64,18 @@ public sealed class WorkdayJobSource(
                     responseBody.Length > 2000 ? responseBody[..2000] : responseBody);
 
                 throw new HttpRequestException(
-                    $"Workday CXS returned {(int)response.StatusCode} ({response.StatusCode}). " +
+                    $"Workday CXS returned {(int)response.StatusCode} ({response.ReasonPhrase}). " +
                     (string.IsNullOrWhiteSpace(responseBody) ? "The response body was empty." : responseBody));
             }
 
             var payload = JsonSerializer.Deserialize<WorkdayJobsResponse>(responseBody);
+            if (payload is null)
+                throw new InvalidOperationException("Workday returned an empty or invalid JSON response.");
 
-            if (payload?.JobPostings is null || payload.JobPostings.Count == 0)
+            if (page == 0)
+                totalJobs = payload.Total;
+
+            if (payload.JobPostings is null || payload.JobPostings.Count == 0)
             {
                 logger.LogInformation(
                     "Workday source {SourceId} page {Page}: no jobs returned",
@@ -120,7 +133,8 @@ public sealed class WorkdayJobSource(
                 pageJobs,
                 jobs.Count);
 
-            if (pageJobs == 0 || jobs.Count >= payload.Total)
+            var nextOffset = (page + 1) * PageSize;
+            if (pageJobs == 0 || (totalJobs.HasValue && totalJobs.Value > 0 && nextOffset >= totalJobs.Value))
                 break;
         }
 
@@ -147,8 +161,17 @@ public sealed class WorkdayJobSource(
             return absolute.ToString();
 
         var uri = new Uri(endpoint, UriKind.Absolute);
-        var host = uri.GetLeftPart(UriPartial.Authority);
-        return $"{host}/{externalPath.TrimStart('/')}";
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var cxsIndex = Array.FindIndex(segments, segment => segment.Equals("cxs", StringComparison.OrdinalIgnoreCase));
+
+        if (cxsIndex >= 0 && cxsIndex + 2 < segments.Length)
+        {
+            var tenant = segments[cxsIndex + 1];
+            var site = segments[cxsIndex + 2];
+            return $"{uri.GetLeftPart(UriPartial.Authority)}/en-US/{site}{externalPath}";
+        }
+
+        return $"{uri.GetLeftPart(UriPartial.Authority)}/{externalPath.TrimStart('/')}";
     }
 
     private static string SanitizeId(string value)
