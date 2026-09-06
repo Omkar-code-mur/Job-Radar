@@ -2,8 +2,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
-namespace JobRadar.Api;
-
 public sealed class OpenRouterAiJobIntelligenceProvider : IAiJobIntelligenceProvider
 {
     private readonly IHttpClientFactory _httpClientFactory;
@@ -23,15 +21,11 @@ public sealed class OpenRouterAiJobIntelligenceProvider : IAiJobIntelligenceProv
     {
         var apiKey = GetSetting("AI_API_KEY", "OPENROUTER_API_KEY");
         if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            throw new AiNotConfiguredException("OpenRouter AI is not configured.");
-        }
+            throw new AiNotConfiguredException();
 
         var model = GetSetting("AI_MODEL", "OPENROUTER_MODEL");
         if (string.IsNullOrWhiteSpace(model))
-        {
             throw new AiNotConfiguredException("AI_MODEL is required when using OpenRouter.");
-        }
 
         var payload = new
         {
@@ -51,7 +45,7 @@ public sealed class OpenRouterAiJobIntelligenceProvider : IAiJobIntelligenceProv
                 {
                     name = "job_intelligence",
                     strict = true,
-                    schema = BuildSchema()
+                    schema = Schema
                 }
             }
         };
@@ -59,23 +53,15 @@ public sealed class OpenRouterAiJobIntelligenceProvider : IAiJobIntelligenceProv
         var client = _httpClientFactory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Content = new StringContent(
-            JsonSerializer.Serialize(payload),
-            Encoding.UTF8,
-            "application/json");
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
         using var response = await client.SendAsync(request, ct);
-        var responseBody = await response.Content.ReadAsStringAsync(ct);
-
         if (!response.IsSuccessStatusCode)
-        {
             throw new AiProviderException($"OpenRouter returned HTTP {(int)response.StatusCode}.");
-        }
 
         try
         {
-            using var document = JsonDocument.Parse(responseBody);
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
             var content = document.RootElement
                 .GetProperty("choices")[0]
                 .GetProperty("message")
@@ -83,12 +69,12 @@ public sealed class OpenRouterAiJobIntelligenceProvider : IAiJobIntelligenceProv
                 .GetString();
 
             if (string.IsNullOrWhiteSpace(content))
-            {
                 throw new AiProviderException("OpenRouter returned an empty AI response.");
-            }
 
-            return JsonSerializer.Deserialize<AiJobAnalysis>(content)
-                   ?? throw new AiProviderException("OpenRouter returned invalid job intelligence JSON.");
+            return JsonSerializer.Deserialize<AiJobAnalysis>(
+                content,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                ?? throw new AiProviderException("OpenRouter returned invalid job intelligence JSON.");
         }
         catch (AiProviderException)
         {
@@ -108,45 +94,24 @@ public sealed class OpenRouterAiJobIntelligenceProvider : IAiJobIntelligenceProv
 
     private static string BuildPrompt(Job job, Profile profile)
     {
-        return $"""
-            Analyze this job against the candidate profile.
-
-            Return only the requested structured JSON. Do not invent candidate experience or requirements.
-            Base the analysis on the supplied evidence and distinguish demonstrated skills from merely discussed skills.
-
-            Candidate profile:
-            Target roles: {JsonSerializer.Serialize(profile.TargetRoles)}
-            Skills: {JsonSerializer.Serialize(profile.Skills)}
-            Preferred locations: {JsonSerializer.Serialize(profile.PreferredLocations)}
-            Experience: {JsonSerializer.Serialize(profile.Experience)}
-            Projects: {JsonSerializer.Serialize(profile.Projects)}
-
-            Job:
-            Title: {job.Title}
-            Company: {job.Company}
-            Location: {job.Location}
-            Description: {job.Description}
-            """;
+        return $"Analyze this job for the candidate using only supplied evidence. Do not invent requirements or candidate experience. Return concise actionable conclusions. JOB: {job.Title} at {job.Company}; location {job.Location}; workplace {job.WorkplaceType}; employment {job.EmploymentType}; description {job.Description}. CANDIDATE: roles {string.Join(", ", profile.Roles)}; skills {string.Join(", ", profile.Skills)}; technologies {string.Join(", ", profile.Technologies)}; experience {profile.MinYears}-{profile.MaxYears}; locations {string.Join(", ", profile.Locations)}; workplace preference {profile.WorkplacePreference}; include {string.Join(", ", profile.IncludeKeywords)}; exclude {string.Join(", ", profile.ExcludeKeywords)}. Existing deterministic score {job.Score}%. Matched skills {string.Join(", ", job.MatchedSkills)}. Missing skills {string.Join(", ", job.MissingSkills)}.";
     }
 
-    private static object BuildSchema() => new
+    private static readonly object Schema = new
     {
         type = "object",
-        additionalProperties = false,
         properties = new
         {
-            Verdict = new { type = "string", @enum = new[] { "STRONG_FIT", "POSSIBLE_FIT", "WEAK_FIT" } },
-            FitScore = new { type = "integer", minimum = 0, maximum = 100 },
-            Summary = new { type = "string" },
-            Strengths = new { type = "array", items = new { type = "string" } },
-            Gaps = new { type = "array", items = new { type = "string" } },
-            Concerns = new { type = "array", items = new { type = "string" } },
-            InterviewFocus = new { type = "array", items = new { type = "string" } },
-            NextAction = new { type = "string" }
+            verdict = new { type = "string", @enum = new[] { "STRONG_FIT", "POSSIBLE_FIT", "WEAK_FIT" } },
+            fitScore = new { type = "integer", minimum = 0, maximum = 100 },
+            summary = new { type = "string" },
+            strengths = new { type = "array", items = new { type = "string" } },
+            gaps = new { type = "array", items = new { type = "string" } },
+            concerns = new { type = "array", items = new { type = "string" } },
+            interviewFocus = new { type = "array", items = new { type = "string" } },
+            nextAction = new { type = "string" }
         },
-        required = new[]
-        {
-            "Verdict", "FitScore", "Summary", "Strengths", "Gaps", "Concerns", "InterviewFocus", "NextAction"
-        }
+        required = new[] { "verdict", "fitScore", "summary", "strengths", "gaps", "concerns", "interviewFocus", "nextAction" },
+        additionalProperties = false
     };
 }
