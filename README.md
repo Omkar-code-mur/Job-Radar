@@ -24,7 +24,23 @@ Prerequisites: Node.js 22+ and npm 10+.
 
 ```bash
 npm install
+```
+
+On Windows, start the backend in its own terminal so API logs remain separate from your working terminal:
+
+```powershell
+.\scripts\run-backend.cmd
+```
+
+The equivalent direct command is:
+
+```bash
 dotnet run --project artifacts/api-server-dotnet/JobRadar.Api.csproj
+```
+
+Then start the web app in your original terminal:
+
+```bash
 npm run dev --workspace=@workspace/job-radar
 ```
 
