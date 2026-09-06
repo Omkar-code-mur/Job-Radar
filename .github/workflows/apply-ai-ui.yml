@@ -1,0 +1,49 @@
+name: apply-ai-ui
+on:
+  push:
+    branches: [feat/ai-job-intelligence]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'chore: apply AI job analysis UI patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ai-job-intelligence
+      - name: Patch UserApp
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('artifacts/job-radar/src/UserApp.tsx')
+          s = p.read_text()
+          s = s.replace("ArrowUpRight, BriefcaseBusiness, Check, ChevronRight, Heart, LayoutDashboard, LogOut, Menu, Settings2, SlidersHorizontal, Bell, UserRound", "ArrowUpRight, BriefcaseBusiness, Check, ChevronRight, Heart, LayoutDashboard, LogOut, Menu, Settings2, SlidersHorizontal, Bell, UserRound, Sparkles, ArrowLeft")
+          s = s.replace("type WorkspaceSettings = { showNotifications:boolean; showMatching:boolean };", "type WorkspaceSettings = { showNotifications:boolean; showMatching:boolean };\ntype AiAnalysis = { verdict:string; fitScore:number; summary:string; strengths:string[]; gaps:string[]; concerns:string[]; interviewFocus:string[]; nextAction:string };")
+          old = ":path==='/matching'&&settings.showMatching?<Matching/>:<NotFound go={go}/>"
+          new = ":path==='/matching'&&settings.showMatching?<Matching/>:<NotFound go={go}/>"
+          s = s.replace(old, new)
+          s = s.replace("const nav=[{p:'/',label:'Today',icon:LayoutDashboard},{p:'/jobs',label:'Jobs',icon:BriefcaseBusiness}", "const nav=[{p:'/',label:'Today',icon:LayoutDashboard},{p:'/jobs',label:'Jobs',icon:BriefcaseBusiness}")
+          old_card = "<div className=\"flex gap-2\"><Button onClick={()=>save('SHORTLISTED')}"
+          new_card = "<div className=\"flex flex-wrap gap-2 justify-end\"><Button onClick={()=>window.location.href=`/jobs/${encodeURIComponent(job.id)}`}>Details</Button><Button onClick={()=>save('SHORTLISTED')}"
+          if old_card not in s:
+              raise SystemExit('JobCard insertion point not found')
+          s = s.replace(old_card, new_card, 1)
+          marker = "function Applications(){"
+          component = '''function JobDetails({id}:{id:string}){\n  const [job,setJob]=useState<Job|null>(null);\n  const [loading,setLoading]=useState(true);\n  const [busy,setBusy]=useState(false);\n  const [analysis,setAnalysis]=useState<AiAnalysis|null>(null);\n  const [provider,setProvider]=useState('');\n  const [error,setError]=useState('');\n  useEffect(()=>{api<Job>(`/jobs/${encodeURIComponent(id)}`).then(setJob).catch(e=>setError(e.message)).finally(()=>setLoading(false))},[id]);\n  const analyze=async()=>{setBusy(true);setError('');try{const r=await api<{provider:string;analysis:AiAnalysis}>(`/jobs/${encodeURIComponent(id)}/ai-analysis`,{method:'POST'});setProvider(r.provider);setAnalysis(r.analysis)}catch(e){setError(e instanceof Error?e.message:'AI analysis failed.')}finally{setBusy(false)}};\n  if(loading)return <Loading/>;\n  if(!job)return <Card><p className=\"font-semibold\">Job not found.</p></Card>;\n  return <div className=\"max-w-4xl space-y-5\"><button onClick={()=>window.history.back()} className=\"inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground\"><ArrowLeft size={15}/>Back</button><Card><div className=\"flex flex-col gap-5 sm:flex-row sm:items-start\"><div className=\"flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground\">{job.company.slice(0,2).toUpperCase()}</div><div className=\"min-w-0 flex-1\"><p className=\"text-sm text-muted-foreground\">{job.company}</p><h1 className=\"mt-1 text-2xl font-bold\">{job.title}</h1><p className=\"mt-2 text-sm text-muted-foreground\">{job.location||'Flexible'} · {job.workplaceType||'—'} · Posted {rel(job.postedDate)} ago</p><div className=\"mt-4 flex flex-wrap items-center gap-2\"><span className=\"rounded-md bg-secondary px-2.5 py-1 text-sm font-bold\">{job.score}% deterministic match</span><Button primary onClick={()=>window.open(job.applicationUrl,'_blank','noopener,noreferrer')}>Apply <ArrowUpRight size={14}/></Button></div></div></div></Card><Card><div className=\"flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between\"><div><h2 className=\"font-bold\">AI job analysis</h2><p className=\"mt-1 text-sm text-muted-foreground\">Optional. AI runs only when you click the button.</p></div><Button primary onClick={analyze} disabled={busy}><Sparkles size={16}/>{busy?'Analyzing…':'Analyze with AI'}</Button></div>{error&&<div className=\"mt-4 rounded-lg border p-3 text-sm\">{error}</div>}{analysis&&<div className=\"mt-5 space-y-5 border-t pt-5\"><div className=\"flex flex-wrap items-center gap-3\"><span className=\"rounded-full bg-secondary px-3 py-1 text-sm font-bold\">{analysis.verdict.replace('_',' ')}</span><span className=\"text-2xl font-bold\">{analysis.fitScore}% AI fit</span>{provider&&<span className=\"text-xs text-muted-foreground\">via {provider}</span>}</div><div><h3 className=\"font-semibold\">Summary</h3><p className=\"mt-1 text-sm leading-6 text-muted-foreground\">{analysis.summary}</p></div>{[['Strengths',analysis.strengths],['Gaps',analysis.gaps],['Concerns',analysis.concerns],['Interview focus',analysis.interviewFocus]].map(([title,items])=><div key={String(title)}><h3 className=\"font-semibold\">{title}</h3>{(items as string[]).length?<ul className=\"mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-muted-foreground\">{(items as string[]).map((x,i)=><li key={i}>{x}</li>)}</ul>:<p className=\"mt-1 text-sm text-muted-foreground\">None identified.</p>}</div>)}<div className=\"rounded-lg bg-secondary p-4\"><p className=\"text-xs font-bold uppercase tracking-wide text-muted-foreground\">Recommended next action</p><p className=\"mt-1 text-sm font-semibold\">{analysis.nextAction}</p></div></div>}</Card><Card><h2 className=\"font-bold\">Job description</h2><div className=\"mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground\">{job.description||'No description available.'}</div></Card></div>\n}\n'''
+          if marker not in s:
+              raise SystemExit('Applications marker not found')
+          s = s.replace(marker, component + marker, 1)
+          old_route = "<main className=\"min-w-0 flex-1 p-4 sm:p-8\">{path==='/'?<Today go={go}/>:path==='/jobs'?<Jobs/>"
+          new_route = "<main className=\"min-w-0 flex-1 p-4 sm:p-8\">{path.match(/^\\/jobs\\/([^/]+)$/)?<JobDetails id={decodeURIComponent(path.split('/')[2])}/>:path==='/'?<Today go={go}/>:path==='/jobs'?<Jobs/>"
+          if old_route not in s:
+              raise SystemExit('Route insertion point not found')
+          s = s.replace(old_route, new_route, 1)
+          p.write_text(s)
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts/job-radar/src/UserApp.tsx
+          git diff --cached --quiet || git commit -m "feat(ui): add opt-in AI job analysis"
+          git push
