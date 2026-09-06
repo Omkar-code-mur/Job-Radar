@@ -18,9 +18,9 @@ public static partial class GreenhouseNormalizer
             .Select(item => item.Name?.Trim()).Where(name => !string.IsNullOrWhiteSpace(name)));
 
         return new Job(
-            $"job-greenhouse-{raw.Id}", companyId, sourceId, company, raw.Title.Trim(), description,
+            $"job-greenhouse-{companyId}-{sourceId}-{raw.Id}", companyId, sourceId, raw.Id.ToString(), company, raw.Title.Trim(), description,
             location, workplace, department, string.Empty,
-            (raw.UpdatedAt ?? now).ToString("O"), now.ToString("O"), raw.AbsoluteUrl, sourceUrl,
+            (raw.UpdatedAt ?? now).ToString("O"), now.ToString("O"), now.ToString("O"), raw.AbsoluteUrl, sourceUrl,
             0, false, false, [], [], new(0, 0, 0, 0, 0, 0));
     }
 

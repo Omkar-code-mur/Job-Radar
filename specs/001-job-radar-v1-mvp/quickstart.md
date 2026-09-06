@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # Quickstart: Greenhouse Public Job Ingestion
 
 ## Prerequisites
@@ -24,7 +26,7 @@ Invoke-RestMethod http://localhost:5000/api/healthz
 Expected result:
 
 ```json
-{"status":"ok"}
+{ "status": "ok" }
 ```
 
 ## Run the frontend
@@ -47,6 +49,9 @@ Open `http://localhost:5173`.
 6. Confirm the jobs view shows normalized roles and the source health view shows the attempt.
 7. Trigger the same scan again and confirm the job count does not increase for unchanged jobs.
 8. Trigger **Scan all** and confirm one source failure does not hide successful source results.
+9. Confirm a repeated successful observation preserves `firstSeenAt` and updates `lastSeenAt`.
+10. Confirm a failed source reports its error and consecutive failure count, then a successful
+    fetch resets that count to zero.
 
 ## Contract checks
 
@@ -58,3 +63,15 @@ Invoke-RestMethod http://localhost:5000/api/dashboard
 
 The expected response shapes are documented in [greenhouse-source.md](contracts/greenhouse-source.md)
 and the source-independent entities are documented in [data-model.md](data-model.md).
+
+Matching, notifications, email delivery, and hourly scheduling are outside this feature and are
+not part of the Greenhouse validation workflow.
+
+## Verification recorded 2026-09-06
+
+- `dotnet test artifacts/api-server-dotnet.tests/JobRadar.Api.Tests.csproj --no-restore`: passed, 5 tests.
+- `dotnet build artifacts/api-server-dotnet/JobRadar.Api.csproj --no-restore`: passed.
+- `npm run typecheck:libs`: passed.
+- `npm run typecheck --workspace=@workspace/job-radar`: passed.
+- `npm run build --workspace=@workspace/job-radar`: passed with an existing tooltip sourcemap warning.
+- `npm run codegen --workspace=@workspace/api-spec`: generated clients successfully; its trailing nested workspace typecheck command reports a workspace-name error, so shared typechecking was run separately.

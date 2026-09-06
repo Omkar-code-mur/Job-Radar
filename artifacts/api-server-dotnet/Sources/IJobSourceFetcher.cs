@@ -9,3 +9,9 @@ public interface IJobSourceFetcher
         string companyName,
         CancellationToken cancellationToken);
 }
+
+public interface IJobSourceDiagnostics
+{
+    int MalformedRecordCount { get; }
+    IReadOnlyList<string> Diagnostics { get; }
+}

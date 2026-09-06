@@ -16,7 +16,7 @@ Job Radar is a personal monitoring dashboard for public company career pages. It
 - Supabase authentication with application-level USER / ADMIN roles
 - Profile fast-track import
 - Optional, user-triggered AI job intelligence
-- Seeded development data so the app is useful immediately
+- Database-backed workspace data configured through Supabase
 
 AI is intentionally not part of automatic scheduler scans. It runs only when the user explicitly selects **Analyze with AI** for a job. The analysis returns a structured verdict, fit score, summary, strengths, gaps, concerns, interview focus, and recommended next action.
 

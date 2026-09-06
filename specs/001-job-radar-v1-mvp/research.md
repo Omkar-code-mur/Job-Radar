@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # Research: Greenhouse Public Job Ingestion
 
 ## Decision: Use the Greenhouse Job Board API
@@ -60,11 +62,11 @@ should remain useful when one item is malformed.
 - Persist unvalidated payloads as jobs: rejected because the frontend and matcher require stable
   fields.
 
-## Decision: Use source-scoped external identity
+## Decision: Use composite external identity
 
 **Decision**: Deduplicate on `(companyId, sourceId, externalJobId)`. Existing records update
-last-seen and mutable normalized fields; first-seen remains unchanged. Only an insert is a new
-job for notification purposes.
+`lastSeenAt` and mutable normalized fields; `firstSeenAt` remains unchanged. Only an insert is
+a new job. Notification behavior is outside this feature and is not changed here.
 
 **Rationale**: Greenhouse job IDs are stable within a board. Including company and source keeps
 identifiers safe if the same external ID appears in another board.
@@ -87,3 +89,35 @@ A small fake `HttpMessageHandler` makes retry and payload cases deterministic.
 
 - Live-only integration tests: rejected because they are slow, rate-sensitive, and brittle.
 - UI-only testing: rejected because source parsing and identity bugs would be hidden.
+
+## Decision: Continue aggregate scans after source failures
+
+**Decision**: A scan over multiple enabled sources continues after any individual source
+failure. The result records per-source failure information and preserves successful source
+results.
+
+**Rationale**: One unavailable source must not discard useful jobs from other permitted public
+sources. This is the clarified failure-isolation contract for the feature.
+
+**Alternatives considered**:
+
+- Abort on unexpected exceptions: rejected because it violates the required aggregate behavior.
+- Retry indefinitely: rejected because retries remain bounded and observable.
+
+## Decision: Track current source health
+
+**Decision**: `failureCount` represents consecutive failed attempts and resets to zero after a
+successful fetch. `lastFetch`, status, fetched count, and latest error remain source-level
+health fields.
+
+**Rationale**: Current health should describe recoverable source condition rather than lifetime
+history. Historical fetch analytics are outside this feature.
+
+## Decision: Keep the current feature Greenhouse-only
+
+**Decision**: This plan covers fetching, normalization, composite-identity upsert,
+`lastSeenAt`, source health, and aggregate failure isolation. Matching, notifications, email,
+and scheduling remain future features.
+
+**Rationale**: The repository already contains partial implementations of those areas, but
+expanding this slice would create new product scope and obscure Greenhouse verification.

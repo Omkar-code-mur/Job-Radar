@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # Greenhouse Source Contract
 
 ## Configuration
@@ -53,6 +55,16 @@ Missing optional values use empty strings or `Unknown`. Items without `id`, `tit
 
 `POST /api/scheduler/scan` MUST apply the same behavior to every enabled source and continue
 processing when one source fails.
+
+Source responses include `lastSuccess`, `fetchDurationMs`, `malformedRecordCount`, and
+`diagnostics`. `failureCount` counts consecutive failed attempts and resets after success.
+Single-source scans return 400 for disabled, invalid, or unsupported configuration and 404 for
+an unknown source; scan-all retains per-source failures in the aggregate result.
+
+For each successful observation, the service MUST preserve `firstSeenAt` for an existing job and
+update its `lastSeenAt`. Source health MUST increment consecutive failures after a failed
+attempt and reset `failureCount` to zero after a successful fetch. The aggregate scan result
+MUST retain successful source results and report per-source failures.
 
 ## Error behavior
 

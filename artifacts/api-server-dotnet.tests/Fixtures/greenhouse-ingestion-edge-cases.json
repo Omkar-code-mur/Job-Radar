@@ -1,0 +1,34 @@
+{
+  "jobs": [
+    {
+      "id": 1001,
+      "title": "Full Stack Engineer",
+      "content": "<p>Build <strong>React</strong> services.</p>",
+      "absolute_url": "https://boards.greenhouse.io/example/jobs/1001",
+      "updated_at": "2026-09-06T08:00:00Z",
+      "location": { "name": "Remote - India" },
+      "departments": [{ "name": "Engineering" }],
+      "offices": []
+    },
+    {
+      "id": 1001,
+      "title": "Full Stack Engineer",
+      "content": "<p>Updated description.</p>",
+      "absolute_url": "https://boards.greenhouse.io/example/jobs/1001",
+      "updated_at": "2026-09-06T09:00:00Z",
+      "location": { "name": "Remote - India" },
+      "departments": [{ "name": "Engineering" }],
+      "offices": []
+    },
+    {
+      "id": 1002,
+      "title": "Incomplete listing",
+      "content": null,
+      "absolute_url": null,
+      "updated_at": null,
+      "location": null,
+      "departments": null,
+      "offices": null
+    }
+  ]
+}

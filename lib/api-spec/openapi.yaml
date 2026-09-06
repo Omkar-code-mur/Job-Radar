@@ -1,3 +1,5 @@
+# @format
+
 openapi: 3.1.0
 info:
   title: Api
@@ -329,7 +331,16 @@ components:
             $ref: "#/components/schemas/JobSource"
     DashboardStats:
       type: object
-      required: [companies, activeSources, jobs, newJobs, matchedJobs, notifiedJobs, failedSources]
+      required:
+        [
+          companies,
+          activeSources,
+          jobs,
+          newJobs,
+          matchedJobs,
+          notifiedJobs,
+          failedSources,
+        ]
       properties:
         companies: { type: integer }
         activeSources: { type: integer }
@@ -340,7 +351,8 @@ components:
         failedSources: { type: integer }
     Company:
       type: object
-      required: [id, name, domain, initials, color, enabled, sourceCount, jobCount]
+      required:
+        [id, name, domain, initials, color, enabled, sourceCount, jobCount]
       properties:
         id: { type: string }
         name: { type: string }
@@ -365,19 +377,53 @@ components:
         enabled: { type: boolean }
     JobSource:
       type: object
-      required: [id, companyId, companyName, name, type, url, enabled, status, lastFetch, jobsFetched, failureCount]
+      required:
+        [
+          id,
+          companyId,
+          companyName,
+          name,
+          type,
+          url,
+          enabled,
+          status,
+          lastFetch,
+          lastSuccess,
+          fetchDurationMs,
+          jobsFetched,
+          failureCount,
+          malformedRecordCount,
+          diagnostics,
+        ]
       properties:
         id: { type: string }
         companyId: { type: string }
         companyName: { type: string }
         name: { type: string }
-        type: { type: string, enum: [GREENHOUSE_API, DELOITTE_USI, LEVER_API, STRUCTURED_HTML, GENERIC_HTML] }
+        type:
+          {
+            type: string,
+            enum:
+              [
+                GREENHOUSE_API,
+                DELOITTE_USI,
+                LEVER_API,
+                STRUCTURED_HTML,
+                GENERIC_HTML,
+              ],
+          }
         url: { type: string }
         enabled: { type: boolean }
         status: { type: string, enum: [healthy, warning, failed, never_run] }
         lastFetch: { type: string }
+        lastSuccess: { type: string }
+        fetchDurationMs: { type: integer }
         jobsFetched: { type: integer }
         failureCount: { type: integer }
+        malformedRecordCount: { type: integer }
+        diagnostics:
+          type: array
+          items: { type: string }
         lastError: { type: ["string", "null"] }
     SourceInput:
       type: object
@@ -385,30 +431,70 @@ components:
       properties:
         companyId: { type: string }
         name: { type: string }
-        type: { type: string, enum: [GREENHOUSE_API, DELOITTE_USI, LEVER_API, STRUCTURED_HTML, GENERIC_HTML] }
+        type:
+          {
+            type: string,
+            enum:
+              [
+                GREENHOUSE_API,
+                DELOITTE_USI,
+                LEVER_API,
+                STRUCTURED_HTML,
+                GENERIC_HTML,
+              ],
+          }
         url: { type: string }
+        boardToken: { type: string }
     SourceUpdate:
       type: object
       properties:
         name: { type: string }
         url: { type: string }
         enabled: { type: boolean }
+        boardToken: { type: string }
     Job:
       type: object
-      required: [id, companyId, sourceId, company, title, description, location, workplaceType, department, employmentType, postedDate, firstSeenAt, applicationUrl, sourceUrl, score, isMatch, notified, matchedSkills, missingSkills, breakdown]
+      required:
+        [
+          id,
+          companyId,
+          sourceId,
+          externalJobId,
+          company,
+          title,
+          description,
+          location,
+          workplaceType,
+          department,
+          employmentType,
+          postedDate,
+          firstSeenAt,
+          lastSeenAt,
+          applicationUrl,
+          sourceUrl,
+          score,
+          isMatch,
+          notified,
+          matchedSkills,
+          missingSkills,
+          breakdown,
+        ]
       properties:
         id: { type: string }
         companyId: { type: string }
         sourceId: { type: string }
+        externalJobId: { type: string }
         company: { type: string }
         title: { type: string }
         description: { type: string }
         location: { type: string }
-        workplaceType: { type: string, enum: [Remote, Hybrid, "On-site", Unknown] }
+        workplaceType:
+          { type: string, enum: [Remote, Hybrid, "On-site", Unknown] }
         department: { type: string }
         employmentType: { type: string }
         postedDate: { type: string }
         firstSeenAt: { type: string }
+        lastSeenAt: { type: string }
         applicationUrl: { type: string }
         sourceUrl: { type: string }
         score: { type: integer }
@@ -434,7 +520,20 @@ components:
         freshness: { type: integer }
     CandidateProfile:
       type: object
-      required: [id, roles, skills, technologies, minYears, maxYears, locations, workplacePreference, includeKeywords, excludeKeywords, email]
+      required:
+        [
+          id,
+          roles,
+          skills,
+          technologies,
+          minYears,
+          maxYears,
+          locations,
+          workplacePreference,
+          includeKeywords,
+          excludeKeywords,
+          email,
+        ]
       properties:
         id: { type: string }
         roles: { type: array, items: { type: string } }
@@ -443,13 +542,26 @@ components:
         minYears: { type: integer }
         maxYears: { type: integer }
         locations: { type: array, items: { type: string } }
-        workplacePreference: { type: string, enum: [Remote, Hybrid, "On-site", Any] }
+        workplacePreference:
+          { type: string, enum: [Remote, Hybrid, "On-site", Any] }
         includeKeywords: { type: array, items: { type: string } }
         excludeKeywords: { type: array, items: { type: string } }
         email: { type: string }
     ProfileInput:
       type: object
-      required: [roles, skills, technologies, minYears, maxYears, locations, workplacePreference, includeKeywords, excludeKeywords, email]
+      required:
+        [
+          roles,
+          skills,
+          technologies,
+          minYears,
+          maxYears,
+          locations,
+          workplacePreference,
+          includeKeywords,
+          excludeKeywords,
+          email,
+        ]
       properties:
         roles: { type: array, items: { type: string } }
         skills: { type: array, items: { type: string } }
@@ -457,13 +569,23 @@ components:
         minYears: { type: integer, minimum: 0 }
         maxYears: { type: integer, minimum: 0 }
         locations: { type: array, items: { type: string } }
-        workplacePreference: { type: string, enum: [Remote, Hybrid, "On-site", Any] }
+        workplacePreference:
+          { type: string, enum: [Remote, Hybrid, "On-site", Any] }
         includeKeywords: { type: array, items: { type: string } }
         excludeKeywords: { type: array, items: { type: string } }
         email: { type: string }
     MatchingConfiguration:
       type: object
-      required: [threshold, roleWeight, skillsWeight, experienceWeight, locationWeight, aiWeight, freshnessWeight]
+      required:
+        [
+          threshold,
+          roleWeight,
+          skillsWeight,
+          experienceWeight,
+          locationWeight,
+          aiWeight,
+          freshnessWeight,
+        ]
       properties:
         threshold: { type: integer, minimum: 0, maximum: 100 }
         roleWeight: { type: integer }
@@ -474,7 +596,16 @@ components:
         freshnessWeight: { type: integer }
     MatchingInput:
       type: object
-      required: [threshold, roleWeight, skillsWeight, experienceWeight, locationWeight, aiWeight, freshnessWeight]
+      required:
+        [
+          threshold,
+          roleWeight,
+          skillsWeight,
+          experienceWeight,
+          locationWeight,
+          aiWeight,
+          freshnessWeight,
+        ]
       properties:
         threshold: { type: integer, minimum: 0, maximum: 100 }
         roleWeight: { type: integer, minimum: 0 }
@@ -496,12 +627,35 @@ components:
         sentAt: { type: string }
         status: { type: string, enum: [sent, failed, pending] }
         error: { type: ["string", "null"] }
+    SourceScanFailure:
+      type: object
+      required: [sourceId, sourceType, error, malformedRecordCount, diagnostics]
+      properties:
+        sourceId: { type: string }
+        sourceType: { type: string }
+        error: { type: string }
+        malformedRecordCount: { type: integer }
+        diagnostics:
+          type: array
+          items: { type: string }
     ScanResult:
       type: object
-      required: [sourcesScanned, jobsFetched, newJobs, matchedJobs, notificationsSent]
+      required:
+        [
+          sourcesScanned,
+          jobsFetched,
+          newJobs,
+          matchedJobs,
+          notificationsSent,
+          failures,
+        ]
       properties:
         sourcesScanned: { type: integer }
         jobsFetched: { type: integer }
         newJobs: { type: integer }
         matchedJobs: { type: integer }
         notificationsSent: { type: integer }
+        failures:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceScanFailure"
