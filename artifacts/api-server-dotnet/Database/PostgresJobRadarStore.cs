@@ -27,19 +27,23 @@ public sealed class PostgresJobRadarStore
                 id text primary key, company_id text not null references companies(id) on delete cascade,
                 name text not null, type text not null, url text not null, board_token text,
                 enabled boolean not null default true, status text not null default 'never_run',
-                last_fetch text not null default 'Never', jobs_fetched integer not null default 0,
-                failure_count integer not null default 0, last_error text
+                last_fetch text not null default 'Never', last_success text not null default 'Never',
+                fetch_duration_ms integer not null default 0, jobs_fetched integer not null default 0,
+                failure_count integer not null default 0, last_error text,
+                malformed_records integer not null default 0, diagnostics jsonb not null default '[]'
             );
             create table if not exists jobs (
                 id text primary key, company_id text not null references companies(id) on delete cascade,
-                source_id text not null references sources(id) on delete cascade, company text not null,
+                source_id text not null references sources(id) on delete cascade, external_job_id text not null,
+                company text not null,
                 title text not null, description text not null, location text not null,
                 workplace_type text not null, department text not null, employment_type text not null,
-                posted_date text not null, first_seen_at text not null, application_url text not null,
+                posted_date text not null, first_seen_at text not null, last_seen_at text not null,
+                application_url text not null,
                 source_url text not null, score integer not null default 0, is_match boolean not null default false,
                 notified boolean not null default false, matched_skills jsonb not null default '[]',
                 missing_skills jsonb not null default '[]', breakdown jsonb not null default '{}',
-                unique(company_id, source_id, id)
+                unique(company_id, source_id, external_job_id)
             );
             create table if not exists profiles (
                 id text primary key,
@@ -67,6 +71,23 @@ public sealed class PostgresJobRadarStore
             create index if not exists ix_jobs_location on jobs(location);
             create index if not exists ix_jobs_posted_date on jobs(posted_date);
             create index if not exists ix_sources_company on sources(company_id);
+            -- Upgrade existing installations without discarding persisted jobs.
+            alter table jobs add column if not exists external_job_id text;
+            alter table jobs add column if not exists last_seen_at text;
+            alter table sources add column if not exists last_success text default 'Never';
+            alter table sources add column if not exists fetch_duration_ms integer default 0;
+            alter table sources add column if not exists malformed_records integer default 0;
+            alter table sources add column if not exists diagnostics jsonb default '[]';
+            update sources set last_success = coalesce(last_success, 'Never'), fetch_duration_ms = coalesce(fetch_duration_ms, 0), malformed_records = coalesce(malformed_records, 0), diagnostics = coalesce(diagnostics, '[]'::jsonb);
+            update jobs set external_job_id = coalesce(nullif(external_job_id, ''), case when id ~ '^job-greenhouse-[0-9]+$' then substring(id from '^job-greenhouse-([0-9]+)$') when id ~ '^job-deloitte-usi-[0-9]+$' then substring(id from '^job-deloitte-usi-([0-9]+)$') else id end), last_seen_at = coalesce(nullif(last_seen_at, ''), first_seen_at);
+            alter table jobs alter column external_job_id set not null;
+            alter table jobs alter column last_seen_at set not null;
+            do $$ begin
+                if exists (select 1 from jobs group by company_id, source_id, external_job_id having count(*) > 1) then
+                    raise exception 'Cannot enforce composite job identity: duplicate legacy jobs require manual review.';
+                end if;
+            end $$;
+            create unique index if not exists ux_jobs_company_source_external on jobs(company_id, source_id, external_job_id);
             """, connection);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -102,20 +123,32 @@ public sealed class PostgresJobRadarStore
 
     public async Task<IReadOnlyList<JobSource>> GetSourcesAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken); await using var command = new NpgsqlCommand("select s.id,s.company_id,c.name,s.name,s.type,s.url,s.enabled,s.status,s.last_fetch,s.jobs_fetched,s.failure_count,s.last_error,s.board_token from sources s join companies c on c.id=s.company_id order by c.name,s.name", connection); await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var result = new List<JobSource>(); while (await reader.ReadAsync(cancellationToken)) result.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetBoolean(6), reader.GetString(7), reader.GetString(8), reader.GetInt32(9), reader.GetInt32(10), reader.IsDBNull(11) ? null : reader.GetString(11), reader.IsDBNull(12) ? null : reader.GetString(12))); return result;
+        await using var connection = await OpenAsync(cancellationToken); await using var command = new NpgsqlCommand("select s.id,s.company_id,c.name,s.name,s.type,s.url,s.enabled,s.status,s.last_fetch,s.last_success,s.fetch_duration_ms,s.jobs_fetched,s.failure_count,s.last_error,s.malformed_records,s.diagnostics,s.board_token from sources s join companies c on c.id=s.company_id order by c.name,s.name", connection); await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var result = new List<JobSource>(); while (await reader.ReadAsync(cancellationToken)) result.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetBoolean(6), reader.GetString(7), reader.GetString(8), reader.GetInt32(11), reader.GetInt32(12), reader.IsDBNull(13) ? null : reader.GetString(13), reader.IsDBNull(16) ? null : reader.GetString(16), reader.GetString(9), checked((int)reader.GetInt64(10)), reader.GetInt32(14), Json<string[]>(reader.GetFieldValue<string>(15)))); return result;
     }
 
     public async Task<JobSource?> AddSourceAsync(SourceInput input, CancellationToken cancellationToken = default)
     {
         var companies = await GetCompaniesAsync(cancellationToken); var company = companies.FirstOrDefault(item => item.Id == input.CompanyId); if (company is null) return null;
-        var token = input.BoardToken ?? ExtractBoardToken(input.Url); var source = new JobSource($"source-{Guid.NewGuid():N}"[..15], company.Id, company.Name, input.Name.Trim(), input.Type, input.Url.Trim(), true, "never_run", "Never", 0, 0, null, token);
+        var token = input.BoardToken ?? ExtractBoardToken(input.Url);
+        if (string.Equals(input.Type, "GREENHOUSE_API", StringComparison.OrdinalIgnoreCase)
+            && (string.IsNullOrWhiteSpace(token) || !Uri.TryCreate(input.Url, UriKind.Absolute, out var boardUri)
+                || !boardUri.Host.Equals("boards.greenhouse.io", StringComparison.OrdinalIgnoreCase)))
+            return null;
+        var source = new JobSource($"source-{Guid.NewGuid():N}"[..15], company.Id, company.Name, input.Name.Trim(), input.Type, input.Url.Trim(), true, "never_run", "Never", 0, 0, null, token, "Never", 0, 0, []);
         await using var connection = await OpenAsync(cancellationToken); await using var command = new NpgsqlCommand("insert into sources (id,company_id,name,type,url,board_token) values (@id,@company,@name,@type,@url,@token)", connection); Add(command, "id", source.Id); Add(command, "company", source.CompanyId); Add(command, "name", source.Name); Add(command, "type", source.Type); Add(command, "url", source.Url); Add(command, "token", (object?)source.BoardToken ?? DBNull.Value); await command.ExecuteNonQueryAsync(cancellationToken); return source;
     }
 
     public async Task<JobSource?> UpdateSourceAsync(string id, SourceUpdate input, CancellationToken cancellationToken = default)
     {
-        var source = (await GetSourcesAsync(cancellationToken)).FirstOrDefault(item => item.Id == id); if (source is null) return null; var updated = source with { Name = input.Name ?? source.Name, Url = input.Url ?? source.Url, Enabled = input.Enabled ?? source.Enabled, BoardToken = source.BoardToken ?? ExtractBoardToken(input.Url ?? source.Url) };
+        var source = (await GetSourcesAsync(cancellationToken)).FirstOrDefault(item => item.Id == id); if (source is null) return null;
+        var updatedUrl = input.Url ?? source.Url;
+        var boardToken = input.BoardToken ?? (input.Url is null ? source.BoardToken : ExtractBoardToken(updatedUrl));
+        if (string.Equals(source.Type, "GREENHOUSE_API", StringComparison.OrdinalIgnoreCase)
+            && (string.IsNullOrWhiteSpace(boardToken) || !Uri.TryCreate(updatedUrl, UriKind.Absolute, out var boardUri)
+                || !boardUri.Host.Equals("boards.greenhouse.io", StringComparison.OrdinalIgnoreCase)))
+            return null;
+        var updated = source with { Name = input.Name ?? source.Name, Url = updatedUrl, Enabled = input.Enabled ?? source.Enabled, BoardToken = boardToken };
         await using var connection = await OpenAsync(cancellationToken); await using var command = new NpgsqlCommand("update sources set name=@name,url=@url,enabled=@enabled,board_token=@token where id=@id", connection); Add(command, "id", id); Add(command, "name", updated.Name); Add(command, "url", updated.Url); Add(command, "enabled", updated.Enabled); Add(command, "token", (object?)updated.BoardToken ?? DBNull.Value); await command.ExecuteNonQueryAsync(cancellationToken); return updated;
     }
 
@@ -123,7 +156,7 @@ public sealed class PostgresJobRadarStore
 
     public async Task<IReadOnlyList<Job>> GetJobsAsync(string? search, string? status, string? location, string? workplaceType, CancellationToken cancellationToken = default)
     {
-        var sql = "select id,company_id,source_id,company,title,description,location,workplace_type,department,employment_type,posted_date,first_seen_at,application_url,source_url,score,is_match,notified,matched_skills,missing_skills,breakdown from jobs where 1=1"; if (!string.IsNullOrWhiteSpace(search)) sql += " and (title ilike @search or company ilike @search or description ilike @search)"; if (!string.IsNullOrWhiteSpace(location)) sql += " and location ilike @location"; if (!string.IsNullOrWhiteSpace(workplaceType)) sql += " and workplace_type=@workplace"; if (status == "matched") sql += " and is_match=true"; if (status == "notified") sql += " and notified=true"; if (status == "new") sql += " and first_seen_at::timestamptz > now() - interval '1 day'"; sql += " order by posted_date desc";
+        var sql = "select id,company_id,source_id,external_job_id,company,title,description,location,workplace_type,department,employment_type,posted_date,first_seen_at,last_seen_at,application_url,source_url,score,is_match,notified,matched_skills,missing_skills,breakdown from jobs where 1=1"; if (!string.IsNullOrWhiteSpace(search)) sql += " and (title ilike @search or company ilike @search or description ilike @search)"; if (!string.IsNullOrWhiteSpace(location)) sql += " and location ilike @location"; if (!string.IsNullOrWhiteSpace(workplaceType)) sql += " and workplace_type=@workplace"; if (status == "matched") sql += " and is_match=true"; if (status == "notified") sql += " and notified=true"; if (status == "new") sql += " and first_seen_at::timestamptz > now() - interval '1 day'"; sql += " order by posted_date desc";
         await using var connection = await OpenAsync(cancellationToken); await using var command = new NpgsqlCommand(sql, connection); if (!string.IsNullOrWhiteSpace(search)) Add(command, "search", $"%{search}%"); if (!string.IsNullOrWhiteSpace(location)) Add(command, "location", $"%{location}%"); if (!string.IsNullOrWhiteSpace(workplaceType)) Add(command, "workplace", workplaceType); return await ReadJobsAsync(command, cancellationToken);
     }
 
@@ -134,8 +167,8 @@ public sealed class PostgresJobRadarStore
         await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         foreach (var job in jobs)
         {
-            await using var command = new NpgsqlCommand("insert into jobs (id,company_id,source_id,company,title,description,location,workplace_type,department,employment_type,posted_date,first_seen_at,application_url,source_url,score,is_match,notified,matched_skills,missing_skills,breakdown) values (@id,@company_id,@source_id,@company,@title,@description,@location,@workplace,@department,@employment,@posted,@first_seen,@application,@source,@score,@match,@notified,@matched,@missing,@breakdown) on conflict (id) do update set title=excluded.title,description=excluded.description,location=excluded.location,workplace_type=excluded.workplace_type,department=excluded.department,posted_date=excluded.posted_date,application_url=excluded.application_url,source_url=excluded.source_url,matched_skills=excluded.matched_skills,missing_skills=excluded.missing_skills,breakdown=excluded.breakdown", connection, transaction);
-            Add(command,"id",job.Id); Add(command,"company_id",job.CompanyId); Add(command,"source_id",job.SourceId); Add(command,"company",job.Company); Add(command,"title",job.Title); Add(command,"description",job.Description); Add(command,"location",job.Location); Add(command,"workplace",job.WorkplaceType); Add(command,"department",job.Department); Add(command,"employment",job.EmploymentType); Add(command,"posted",job.PostedDate); Add(command,"first_seen",job.FirstSeenAt); Add(command,"application",job.ApplicationUrl); Add(command,"source",job.SourceUrl); Add(command,"score",job.Score); Add(command,"match",job.IsMatch); Add(command,"notified",job.Notified); Add(command,"matched",JsonSerializer.Serialize(job.MatchedSkills,jsonOptions)); Add(command,"missing",JsonSerializer.Serialize(job.MissingSkills,jsonOptions)); Add(command,"breakdown",JsonSerializer.Serialize(job.Breakdown,jsonOptions)); await command.ExecuteNonQueryAsync(cancellationToken);
+            await using var command = new NpgsqlCommand("insert into jobs (id,company_id,source_id,external_job_id,company,title,description,location,workplace_type,department,employment_type,posted_date,first_seen_at,last_seen_at,application_url,source_url,score,is_match,notified,matched_skills,missing_skills,breakdown) values (@id,@company_id,@source_id,@external_job_id,@company,@title,@description,@location,@workplace,@department,@employment,@posted,@first_seen,@last_seen,@application,@source,@score,@match,@notified,@matched,@missing,@breakdown) on conflict (company_id, source_id, external_job_id) do update set title=excluded.title,description=excluded.description,location=excluded.location,workplace_type=excluded.workplace_type,department=excluded.department,employment_type=excluded.employment_type,posted_date=excluded.posted_date,last_seen_at=excluded.last_seen_at,application_url=excluded.application_url,source_url=excluded.source_url,matched_skills=excluded.matched_skills,missing_skills=excluded.missing_skills,breakdown=excluded.breakdown", connection, transaction);
+            Add(command,"id",job.Id); Add(command,"company_id",job.CompanyId); Add(command,"source_id",job.SourceId); Add(command,"external_job_id",job.ExternalJobId); Add(command,"company",job.Company); Add(command,"title",job.Title); Add(command,"description",job.Description); Add(command,"location",job.Location); Add(command,"workplace",job.WorkplaceType); Add(command,"department",job.Department); Add(command,"employment",job.EmploymentType); Add(command,"posted",job.PostedDate); Add(command,"first_seen",job.FirstSeenAt); Add(command,"last_seen",job.LastSeenAt); Add(command,"application",job.ApplicationUrl); Add(command,"source",job.SourceUrl); Add(command,"score",job.Score); Add(command,"match",job.IsMatch); Add(command,"notified",job.Notified); Add(command,"matched",JsonSerializer.Serialize(job.MatchedSkills,jsonOptions)); Add(command,"missing",JsonSerializer.Serialize(job.MissingSkills,jsonOptions)); Add(command,"breakdown",JsonSerializer.Serialize(job.Breakdown,jsonOptions)); await command.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
     }
@@ -173,28 +206,42 @@ public sealed class PostgresJobRadarStore
 
     public async Task<ScanResult> ScanAsync(Guid userId, IReadOnlyCollection<string> ids, JobSourceFetcherFactory sourceFetcherFactory, CancellationToken cancellationToken = default)
     {
-        var sources = (await GetSourcesAsync(cancellationToken)).Where(item => ids.Contains(item.Id) && item.Enabled).ToList(); var fetched=0; var added=0;
-        var profile=await GetProfileAsync(userId,cancellationToken); var matching=await GetMatchingAsync(userId,cancellationToken);
+        var allSources = await GetSourcesAsync(cancellationToken);
+        var requestedSources = allSources.Where(item => ids.Contains(item.Id)).ToList();
+        if (ids.Count == 1)
+        {
+            var requested = requestedSources.SingleOrDefault();
+            if (requested is null) throw new ScanRequestException(StatusCodes.Status404NotFound, "Source not found.");
+            if (!requested.Enabled) throw new ScanRequestException(StatusCodes.Status400BadRequest, "Source is disabled.");
+            if (string.Equals(requested.Type, "GREENHOUSE_API", StringComparison.OrdinalIgnoreCase)
+                && (string.IsNullOrWhiteSpace(requested.BoardToken) || !Uri.TryCreate(requested.Url, UriKind.Absolute, out var boardUri)
+                    || !boardUri.Host.Equals("boards.greenhouse.io", StringComparison.OrdinalIgnoreCase)))
+                throw new ScanRequestException(StatusCodes.Status400BadRequest, "Greenhouse source requires a public boards.greenhouse.io URL and boardToken.");
+            try { sourceFetcherFactory.Get(requested.Type); }
+            catch (NotSupportedException exception) { throw new ScanRequestException(StatusCodes.Status400BadRequest, exception.Message); }
+        }
+
+        var sources = requestedSources.Where(item => item.Enabled).ToList(); var fetched=0; var added=0;
+        var failures = new List<SourceScanFailure>();
+        // A source failure is recorded locally so successful sources can still commit progress.
         foreach(var source in sources)
         {
             try
             {
-                var fetcher=sourceFetcherFactory.Get(source.Type); var jobs=await fetcher.FetchAsync(source,source.CompanyName,cancellationToken); jobs=jobs.Select(job=>ScoreJob(job,profile,matching)).ToList(); var existing=(await GetJobsAsync(null,null,null,null,cancellationToken)).Select(item=>item.Id).ToHashSet(); await UpsertJobsAsync(jobs,cancellationToken); fetched+=jobs.Count; added+=jobs.Count(item=>!existing.Contains(item.Id)); await UpdateSourceHealthAsync(source.Id,jobs.Count,null,cancellationToken);
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var fetcher=sourceFetcherFactory.Get(source.Type); var jobs=await fetcher.FetchAsync(source,source.CompanyName,cancellationToken); var diagnostics = fetcher is IJobSourceDiagnostics sourceDiagnostics ? sourceDiagnostics : null; var existing=(await GetJobsAsync(null,null,null,null,cancellationToken)).Select(item=>$"{item.CompanyId}:{item.SourceId}:{item.ExternalJobId}").ToHashSet(); await UpsertJobsAsync(jobs,cancellationToken); fetched+=jobs.Count; added+=jobs.Count(item=>!existing.Contains($"{item.CompanyId}:{item.SourceId}:{item.ExternalJobId}")); await UpdateSourceHealthAsync(source.Id,jobs.Count,null,0,DateTimeOffset.UtcNow.ToString("O"),checked((int)stopwatch.ElapsedMilliseconds),diagnostics?.MalformedRecordCount ?? 0,diagnostics?.Diagnostics ?? [],cancellationToken);
             }
-            catch(NotSupportedException exception){ await UpdateSourceHealthAsync(source.Id,0,exception.Message,cancellationToken); continue; }
-            catch(Exception exception){ await UpdateSourceHealthAsync(source.Id,0,exception.Message,cancellationToken); throw; }
+            catch(Exception exception){ await UpdateSourceHealthAsync(source.Id,0,exception.Message,source.FailureCount+1,source.LastSuccess,source.FetchDurationMs,source.MalformedRecordCount,source.Diagnostics ?? [],cancellationToken); failures.Add(new(source.Id,source.Type,exception.Message,source.MalformedRecordCount,source.Diagnostics ?? [])); }
         }
-        return new(sources.Count,fetched,added,added,0);
+        return new(sources.Count,fetched,added,0,0,failures);
     }
 
     public async Task<IReadOnlyList<Notification>> GetNotificationsAsync(CancellationToken cancellationToken = default) { await using var connection=await OpenAsync(cancellationToken); await using var command=new NpgsqlCommand("select id,job_id,job_title,company,score,type,sent_at,status,error from notifications order by sent_at desc",connection); await using var reader=await command.ExecuteReaderAsync(cancellationToken); var result=new List<Notification>(); while(await reader.ReadAsync(cancellationToken)) result.Add(new(reader.GetString(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetInt32(4),reader.GetString(5),reader.GetString(6),reader.GetString(7),reader.IsDBNull(8)?null:reader.GetString(8))); return result; }
-    private async Task UpdateSourceHealthAsync(string id,int jobs,string? error,CancellationToken cancellationToken) { await using var connection=await OpenAsync(cancellationToken); await using var command=new NpgsqlCommand("update sources set status=@status,last_fetch=@fetch,jobs_fetched=@jobs,last_error=@error where id=@id",connection); Add(command,"id",id); Add(command,"status",error is null?"healthy":"failed"); Add(command,"fetch",DateTimeOffset.UtcNow.ToString("O")); Add(command,"jobs",jobs); Add(command,"error",(object?)error??DBNull.Value); await command.ExecuteNonQueryAsync(cancellationToken); }
-    private static Job ScoreJob(Job job, Profile profile, MatchingConfiguration matching) { var text=$"{job.Title} {job.Description} {job.Department} {job.Location}".ToLowerInvariant(); var excluded=profile.ExcludeKeywords.Any(keyword=>Contains(text,keyword)); var matchedSkills=profile.Skills.Concat(profile.Technologies).Where(keyword=>Contains(text,keyword)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(); var roleMatched=profile.Roles.Any(role=>Contains(text,role)); var locationMatched=profile.Locations.Length==0||profile.Locations.Any(location=>Contains(job.Location,location)); var includeMatched=profile.IncludeKeywords.Length==0||profile.IncludeKeywords.Any(keyword=>Contains(text,keyword)); var roleScore=roleMatched?matching.RoleWeight:0; var skillsScore=profile.Skills.Length+profile.Technologies.Length==0?matching.SkillsWeight:(int)Math.Round(matching.SkillsWeight*(double)matchedSkills.Length/(profile.Skills.Length+profile.Technologies.Length)); var locationScore=locationMatched?matching.LocationWeight:0; var score=excluded?0:roleScore+skillsScore+locationScore+(includeMatched?matching.AiWeight:0)+matching.FreshnessWeight; var breakdown=new Breakdown(roleScore,skillsScore,0,locationScore,includeMatched?matching.AiWeight:0,matching.FreshnessWeight); return job with { Score=Math.Min(score,100), IsMatch=!excluded&&score>=matching.Threshold, MatchedSkills=matchedSkills, MissingSkills=profile.Skills.Where(keyword=>!Contains(text,keyword)).ToArray(), Breakdown=breakdown }; }
-    private static bool Contains(string text,string value)=>!string.IsNullOrWhiteSpace(value)&&text.Contains(value.Trim(),StringComparison.OrdinalIgnoreCase);
-    private async Task<List<Job>> ReadJobsAsync(NpgsqlCommand command,CancellationToken cancellationToken) { await using var reader=await command.ExecuteReaderAsync(cancellationToken); var result=new List<Job>(); while(await reader.ReadAsync(cancellationToken)) result.Add(new(reader.GetString(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetString(4),reader.GetString(5),reader.GetString(6),reader.GetString(7),reader.GetString(8),reader.GetString(9),reader.GetString(10),reader.GetString(11),reader.GetString(12),reader.GetString(13),reader.GetInt32(14),reader.GetBoolean(15),reader.GetBoolean(16),Json<string[]>(reader.GetFieldValue<string>(17)),Json<string[]>(reader.GetFieldValue<string>(18)),Json<Breakdown>(reader.GetFieldValue<string>(19)))); return result; }
+    private async Task UpdateSourceHealthAsync(string id,int jobs,string? error,int failureCount,string lastSuccess,int fetchDurationMs,int malformedRecordCount,IReadOnlyList<string> diagnostics,CancellationToken cancellationToken) { await using var connection=await OpenAsync(cancellationToken); await using var command=new NpgsqlCommand("update sources set status=@status,last_fetch=@fetch,last_success=@success,fetch_duration_ms=@duration,jobs_fetched=@jobs,failure_count=@failure_count,last_error=@error,malformed_records=@malformed,diagnostics=@diagnostics where id=@id",connection); Add(command,"id",id); Add(command,"status",error is null?"healthy":"failed"); Add(command,"fetch",DateTimeOffset.UtcNow.ToString("O")); Add(command,"success",error is null?DateTimeOffset.UtcNow.ToString("O"):lastSuccess); Add(command,"duration",fetchDurationMs); Add(command,"jobs",jobs); Add(command,"failure_count",failureCount); Add(command,"error",(object?)error??DBNull.Value); Add(command,"malformed",malformedRecordCount); Add(command,"diagnostics",JsonSerializer.Serialize(diagnostics)); await command.ExecuteNonQueryAsync(cancellationToken); }
+    private async Task<List<Job>> ReadJobsAsync(NpgsqlCommand command,CancellationToken cancellationToken) { await using var reader=await command.ExecuteReaderAsync(cancellationToken); var result=new List<Job>(); while(await reader.ReadAsync(cancellationToken)) result.Add(new(reader.GetString(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetString(4),reader.GetString(5),reader.GetString(6),reader.GetString(7),reader.GetString(8),reader.GetString(9),reader.GetString(10),reader.GetString(11),reader.GetString(12),reader.GetString(13),reader.GetString(14),reader.GetString(15),reader.GetInt32(16),reader.GetBoolean(17),reader.GetBoolean(18),Json<string[]>(reader.GetFieldValue<string>(19)),Json<string[]>(reader.GetFieldValue<string>(20)),Json<Breakdown>(reader.GetFieldValue<string>(21)))); return result; }
     private async Task<NpgsqlConnection> OpenAsync(CancellationToken cancellationToken) { var connection=new NpgsqlConnection(connectionString); await connection.OpenAsync(cancellationToken); return connection; }
     private async Task<bool> ExecuteBoolAsync(string sql,string id,CancellationToken cancellationToken) { await using var connection=await OpenAsync(cancellationToken); await using var command=new NpgsqlCommand(sql,connection); Add(command,"id",id); return await command.ExecuteNonQueryAsync(cancellationToken)>0; }
-    private static void Add(NpgsqlCommand command,string name,object value) { if(name is "matched" or "missing" or "breakdown") command.Parameters.AddWithValue(name,NpgsqlTypes.NpgsqlDbType.Jsonb,value); else command.Parameters.AddWithValue(name,value); }
+    private static void Add(NpgsqlCommand command,string name,object value) { if(name is "matched" or "missing" or "breakdown" or "diagnostics") command.Parameters.AddWithValue(name,NpgsqlTypes.NpgsqlDbType.Jsonb,value); else command.Parameters.AddWithValue(name,value); }
     private static void AddJson<T>(NpgsqlCommand command,string name,T value)=>command.Parameters.AddWithValue(name,NpgsqlTypes.NpgsqlDbType.Jsonb,JsonSerializer.Serialize(value));
     private T Json<T>(string value)=>JsonSerializer.Deserialize<T>(value,jsonOptions)!;
     private static string Initials(string name) { var parts=name.Split(' ',StringSplitOptions.RemoveEmptyEntries); if(parts.Length==0) return "?"; var initials=string.Concat(parts.Select(part=>part[0])).ToUpperInvariant(); return initials.Length>2?initials[..2]:initials; }

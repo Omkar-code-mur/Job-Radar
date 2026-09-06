@@ -16,9 +16,13 @@ Represents a manually configured permitted public source.
 | enabled | boolean | Disabled sources are never fetched. |
 | status | enum | `healthy`, `warning`, `failed`, or `never_run`. |
 | lastFetch | timestamp/string | Updated after an attempted scan. |
+| lastSuccess | timestamp/string | Updated only after a successful fetch. |
+| fetchDurationMs | integer | Duration of the most recent fetch attempt in milliseconds. |
 | jobsFetched | integer | Number of valid jobs returned by the last successful fetch. |
-| failureCount | integer | Incremented for failed source attempts. |
+| failureCount | integer | Consecutive failed attempts; reset to `0` after a successful fetch. |
 | lastError | string/null | Actionable latest failure, if any. |
+| malformedRecordCount | integer | Number of malformed records skipped by the most recent fetch. |
+| diagnostics | string[] | Source-level diagnostics for skipped malformed records. |
 
 ## Raw Greenhouse Job
 
@@ -42,10 +46,11 @@ The source-independent job record exposed to the existing application.
 
 | Field | Type | Rules |
 |---|---|---|
-| id | string | Internal identifier. |
+| id | string | Internal identifier derived from or associated with the composite identity. |
 | companyId | string | Required company reference. |
 | sourceId | string | Required source reference. |
 | externalJobId | string | Greenhouse `id`; part of deduplication identity. |
+| identity | tuple | Unique by `(companyId, sourceId, externalJobId)`. |
 | title | string | Required normalized title. |
 | description | string | HTML-stripped or safely normalized content. |
 | location | string | Empty or `Unknown` when absent. |
@@ -67,3 +72,4 @@ The source-independent job record exposed to the existing application.
 - Any enabled status -> `never_run` is not automatic; it represents an unscanned source.
 - Existing job: update mutable fields and `lastSeenAt`; preserve `firstSeenAt`.
 - New job: insert once and mark as eligible for matching/notification processing.
+- Multi-source scan: record a failed source and continue processing remaining enabled sources.

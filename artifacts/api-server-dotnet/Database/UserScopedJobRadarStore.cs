@@ -108,10 +108,8 @@ public sealed class UserScopedJobRadarStore
 
     public async Task<ScanResult> ScanAsync(Guid userId, IReadOnlyCollection<string> ids, JobSourceFetcherFactory sourceFetcherFactory, CancellationToken cancellationToken = default)
     {
-        var result = await _inner.ScanAsync(userId, ids, sourceFetcherFactory, cancellationToken);
-        var jobs = await _inner.GetJobsAsync(null, null, null, null, cancellationToken);
-        await UpsertMatchesAsync(userId, jobs, cancellationToken);
-        return result;
+        // Greenhouse ingestion persists neutral job observations; matching is a separate workflow.
+        return await _inner.ScanAsync(userId, ids, sourceFetcherFactory, cancellationToken);
     }
 
     private async Task<Dictionary<string, JobMatch>> GetMatchesAsync(Guid userId, IEnumerable<string> jobIds, CancellationToken cancellationToken)

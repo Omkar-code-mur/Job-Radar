@@ -365,7 +365,7 @@ components:
         enabled: { type: boolean }
     JobSource:
       type: object
-      required: [id, companyId, companyName, name, type, url, enabled, status, lastFetch, jobsFetched, failureCount]
+      required: [id, companyId, companyName, name, type, url, enabled, status, lastFetch, lastSuccess, fetchDurationMs, jobsFetched, failureCount, malformedRecordCount, diagnostics]
       properties:
         id: { type: string }
         companyId: { type: string }
@@ -376,8 +376,14 @@ components:
         enabled: { type: boolean }
         status: { type: string, enum: [healthy, warning, failed, never_run] }
         lastFetch: { type: string }
+        lastSuccess: { type: string }
+        fetchDurationMs: { type: integer }
         jobsFetched: { type: integer }
         failureCount: { type: integer }
+        malformedRecordCount: { type: integer }
+        diagnostics:
+          type: array
+          items: { type: string }
         lastError: { type: ["string", "null"] }
     SourceInput:
       type: object
@@ -387,19 +393,22 @@ components:
         name: { type: string }
         type: { type: string, enum: [GREENHOUSE_API, DELOITTE_USI, LEVER_API, STRUCTURED_HTML, GENERIC_HTML] }
         url: { type: string }
+        boardToken: { type: string }
     SourceUpdate:
       type: object
       properties:
         name: { type: string }
         url: { type: string }
         enabled: { type: boolean }
+        boardToken: { type: string }
     Job:
       type: object
-      required: [id, companyId, sourceId, company, title, description, location, workplaceType, department, employmentType, postedDate, firstSeenAt, applicationUrl, sourceUrl, score, isMatch, notified, matchedSkills, missingSkills, breakdown]
+      required: [id, companyId, sourceId, externalJobId, company, title, description, location, workplaceType, department, employmentType, postedDate, firstSeenAt, lastSeenAt, applicationUrl, sourceUrl, score, isMatch, notified, matchedSkills, missingSkills, breakdown]
       properties:
         id: { type: string }
         companyId: { type: string }
         sourceId: { type: string }
+        externalJobId: { type: string }
         company: { type: string }
         title: { type: string }
         description: { type: string }
@@ -409,6 +418,7 @@ components:
         employmentType: { type: string }
         postedDate: { type: string }
         firstSeenAt: { type: string }
+        lastSeenAt: { type: string }
         applicationUrl: { type: string }
         sourceUrl: { type: string }
         score: { type: integer }
@@ -496,12 +506,27 @@ components:
         sentAt: { type: string }
         status: { type: string, enum: [sent, failed, pending] }
         error: { type: ["string", "null"] }
+    SourceScanFailure:
+      type: object
+      required: [sourceId, sourceType, error, malformedRecordCount, diagnostics]
+      properties:
+        sourceId: { type: string }
+        sourceType: { type: string }
+        error: { type: string }
+        malformedRecordCount: { type: integer }
+        diagnostics:
+          type: array
+          items: { type: string }
     ScanResult:
       type: object
-      required: [sourcesScanned, jobsFetched, newJobs, matchedJobs, notificationsSent]
+      required: [sourcesScanned, jobsFetched, newJobs, matchedJobs, notificationsSent, failures]
       properties:
         sourcesScanned: { type: integer }
         jobsFetched: { type: integer }
         newJobs: { type: integer }
         matchedJobs: { type: integer }
         notificationsSent: { type: integer }
+        failures:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceScanFailure"

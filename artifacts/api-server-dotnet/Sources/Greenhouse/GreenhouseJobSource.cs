@@ -8,13 +8,17 @@ namespace JobRadar.Api.Sources.Greenhouse;
 public sealed class GreenhouseJobSource(
     HttpClient httpClient,
     ILogger<GreenhouseJobSource> logger)
-    : JobRadar.Api.Sources.IJobSourceFetcher
+    : JobRadar.Api.Sources.IJobSourceFetcher, IJobSourceDiagnostics
 {
     public string SourceType => "GREENHOUSE_API";
+    public int MalformedRecordCount { get; private set; }
+    public IReadOnlyList<string> Diagnostics { get; private set; } = [];
     private const int MaxRetries = 2;
 
     public async Task<IReadOnlyList<Job>> FetchAsync(JobSource source, string companyName, CancellationToken cancellationToken)
     {
+        MalformedRecordCount = 0;
+        Diagnostics = [];
         var boardToken = source.BoardToken;
         if (string.IsNullOrWhiteSpace(boardToken))
         {
@@ -41,15 +45,22 @@ public sealed class GreenhouseJobSource(
                     continue;
                 }
 
-                response.EnsureSuccessStatusCode();
+                if (!response.IsSuccessStatusCode)
+                    response.EnsureSuccessStatusCode();
                 var payload = await response.Content.ReadFromJsonAsync<GreenhouseResponse>(cancellationToken: cancellationToken)
                     ?? throw new InvalidOperationException("Greenhouse returned an empty response.");
-                var jobs = (payload.Jobs ?? []).Select(job => GreenhouseNormalizer.Normalize(job, source.CompanyId,
+                var rawJobs = payload.Jobs ?? [];
+                var jobs = rawJobs.Select(job => GreenhouseNormalizer.Normalize(job, source.CompanyId,
                     source.Id, companyName, source.Url, DateTimeOffset.UtcNow)).OfType<Job>().ToList();
+                var malformedCount = rawJobs.Count - jobs.Count;
+                MalformedRecordCount = malformedCount;
+                Diagnostics = malformedCount == 0 ? [] : [$"Skipped {malformedCount} malformed Greenhouse record(s)."];
+                if (malformedCount > 0)
+                    logger.LogWarning("Skipped {MalformedCount} malformed Greenhouse records for source {SourceId}", malformedCount, source.Id);
                 logger.LogInformation("Fetched {JobCount} valid jobs from Greenhouse source {SourceId}", jobs.Count, source.Id);
                 return jobs;
             }
-            catch (HttpRequestException exception) when (attempt < MaxRetries)
+            catch (HttpRequestException exception) when (attempt < MaxRetries && exception.StatusCode is null)
             {
                 logger.LogWarning(
                     exception,

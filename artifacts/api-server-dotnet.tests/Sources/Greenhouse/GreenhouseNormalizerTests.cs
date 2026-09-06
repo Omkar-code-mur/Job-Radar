@@ -17,7 +17,9 @@ public sealed class GreenhouseNormalizerTests
             "https://boards.greenhouse.io/example", DateTimeOffset.UtcNow);
 
         Assert.NotNull(result);
-        Assert.Equal("job-greenhouse-1001", result!.Id);
+        Assert.Equal("job-greenhouse-company-1-source-1-1001", result!.Id);
+        Assert.Equal("1001", result.ExternalJobId);
+        Assert.Equal(result.FirstSeenAt, result.LastSeenAt);
         Assert.Equal("Full Stack Engineer", result.Title);
         Assert.Contains("Build React services.", result.Description);
         Assert.Equal("Remote", result.WorkplaceType);

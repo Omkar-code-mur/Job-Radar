@@ -10,6 +10,18 @@
 
 **Input**: User description: "Build Job Radar V1, a personal job-monitoring platform that watches manually configured company career pages and public job sources, normalizes and deduplicates jobs, evaluates them with transparent rule-based matching, and notifies the user about newly discovered strong matches."
 
+## Clarifications
+
+### Session 2026-09-06
+
+- Q: Should the current feature scope remain limited to verifying and completing the Greenhouse ingestion path, or should it also implement matching and notification gaps? → A: Greenhouse ingestion only: fetching, normalization, deduplication, source health, and failure isolation. Matching, notifications, email, and scheduling remain outside this feature.
+- Q: What identity rule should determine whether two source records represent the same job? → A: Composite identity: `companyId + sourceId + externalJobId`.
+- Q: When scanning multiple enabled sources, should the workflow continue processing all remaining sources after any one source fails? → A: Continue processing all remaining sources, record per-source failures, and return an aggregate result without aborting the overall scan.
+- Q: Should each normalized job store an explicit `lastSeenAt` timestamp that updates on every successful observation? → A: Add `lastSeenAt` and update it on every successful observation.
+- Q: Should a source's failure count represent consecutive failures since its last successful fetch or the cumulative number of failures over its lifetime? → A: Track consecutive failures and reset the count to zero after a successful fetch.
+
+**Current feature boundary:** This feature implements and verifies Greenhouse fetching, normalization, deduplication, source health, and failure isolation on the existing PostgreSQL-backed product. A job is unique by `companyId + sourceId + externalJobId`; repeated observations update that record and its explicit `lastSeenAt` timestamp. Multi-source scans continue after individual source failures and return per-source failure information in the aggregate result. Source health tracks consecutive failures and resets that count after a successful fetch. Matching, notifications, email delivery, and scheduled monitoring remain separate future work and are not current-feature acceptance requirements.
+
 ## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - Monitor and Review New Jobs (Priority: P1)

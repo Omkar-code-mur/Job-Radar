@@ -59,8 +59,8 @@ public sealed partial class DeloitteUsiJobSource(
                 var location = DetectLocation($"{slug} {html}");
 
                 jobs.Add(new Job(
-                    $"job-deloitte-usi-{id}", source.CompanyId, source.Id, companyName, title, title,
-                    location, "Unknown", string.Empty, string.Empty, now.ToString("O"), now.ToString("O"),
+                    $"job-deloitte-usi-{source.CompanyId}-{source.Id}-{id}", source.CompanyId, source.Id, id, companyName, title, title,
+                    location, "Unknown", string.Empty, string.Empty, now.ToString("O"), now.ToString("O"), now.ToString("O"),
                     applicationUrl, source.Url, 0, false, false, [], [], new(0, 0, 0, 0, 0, 0)));
 
                 pageJobs++;
