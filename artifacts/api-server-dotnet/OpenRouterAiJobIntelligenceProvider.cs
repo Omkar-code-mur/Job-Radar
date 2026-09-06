@@ -21,7 +21,7 @@ public sealed class OpenRouterAiJobIntelligenceProvider : IAiJobIntelligenceProv
     {
         var apiKey = GetSetting("AI_API_KEY", "OPENROUTER_API_KEY");
         if (string.IsNullOrWhiteSpace(apiKey))
-            throw new AiNotConfiguredException();
+            throw new AiNotConfiguredException("OpenRouter AI is not configured.");
 
         var model = GetSetting("AI_MODEL", "OPENROUTER_MODEL");
         if (string.IsNullOrWhiteSpace(model))
@@ -53,6 +53,7 @@ public sealed class OpenRouterAiJobIntelligenceProvider : IAiJobIntelligenceProv
         var client = _httpClientFactory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
         using var response = await client.SendAsync(request, ct);
