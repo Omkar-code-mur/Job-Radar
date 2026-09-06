@@ -29,6 +29,8 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install
         run: npm ci
+      - name: Build TypeScript project references
+        run: npm run typecheck:libs
       - name: Typecheck
         run: npm run typecheck --workspace=@workspace/job-radar
       - name: Build
