@@ -14,9 +14,11 @@ Job Radar is a personal monitoring dashboard for public company career pages. It
 - Notification history
 - Manual scan for one source or all enabled sources
 - Supabase authentication with application-level USER / ADMIN roles
+- Profile fast-track import
+- Optional, user-triggered AI job intelligence
 - Seeded development data so the app is useful immediately
 
-V1 intentionally does not use AI, LLMs, embeddings, browser automation, or private APIs.
+AI is intentionally not part of automatic scheduler scans. It runs only when the user explicitly selects **Analyze with AI** for a job. The analysis returns a structured verdict, fit score, summary, strengths, gaps, concerns, interview focus, and recommended next action.
 
 ## Run locally
 
@@ -48,33 +50,22 @@ The ASP.NET Core API runs at `http://localhost:5000/api`; the Job Radar web app 
 `http://localhost:5173` and proxies `/api` requests to the backend.
 
 The API uses Supabase PostgreSQL. For local credentials, initialize .NET User Secrets once
-and store the database connection string and Supabase JWT secret outside the repository:
-
-```powershell
-dotnet user-secrets init --project artifacts/api-server-dotnet/JobRadar.Api.csproj
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=YOUR_HOST;Port=5432;Database=postgres;Username=YOUR_USER;Password=YOUR_PASSWORD;SSL Mode=Require" --project artifacts/api-server-dotnet/JobRadar.Api.csproj
-dotnet user-secrets set "SUPABASE_URL" "https://YOUR_PROJECT.supabase.co" --project artifacts/api-server-dotnet/JobRadar.Api.csproj
-dotnet user-secrets set "SUPABASE_JWT_SECRET" "YOUR_SUPABASE_JWT_SECRET" --project artifacts/api-server-dotnet/JobRadar.Api.csproj
-dotnet user-secrets set "JOBRADAR_ADMIN_EMAIL" "you@example.com" --project artifacts/api-server-dotnet/JobRadar.Api.csproj
-```
+and store the database connection string and Supabase JWT secret outside the repository.
 
 For the browser, copy `artifacts/job-radar/.env.example` to `.env.local` and fill in the same
 Supabase project URL plus the project's public anon key. Never commit real credentials.
 
-Authentication is handled by Supabase Auth. Job Radar does not store passwords. On the first
-authenticated API request, the user's Supabase UUID and email are synchronized into the local
-`users` table. Users default to `USER`; the configured `JOBRADAR_ADMIN_EMAIL` is promoted to
-`ADMIN` automatically. Admin-management UI is intentionally deferred to a later PR.
+## Verification
 
-The API creates the required application tables and indexes if they do not exist. The local
-development settings file is ignored by Git and must never contain a committed password or JWT secret.
-
-Useful checks:
+Run locally before merging:
 
 ```bash
-npm run typecheck
+dotnet build artifacts/api-server-dotnet/JobRadar.Api.csproj
 npm run typecheck --workspace=@workspace/job-radar
+npm run build --workspace=@workspace/job-radar
 ```
+
+GitHub Actions runs the backend build plus frontend typecheck/build for pull requests and pushes to `main`.
 
 ## Architecture
 
@@ -85,6 +76,12 @@ Supabase Auth -> ASP.NET Core JWT validation -> users (USER / ADMIN)
                                       |
 JobSource adapters -> fetching -> normalization -> persistence -> filtering
   -> IMatchingEngine -> notifications
+                                      |
+                              Analyze with AI
+                                      |
+                         IAiJobIntelligenceProvider
+                           /                    \
+                 OpenAI-compatible          future providers
 ```
 
 The matching boundary is deliberately small:
@@ -95,7 +92,15 @@ interface IMatchingEngine {
 }
 ```
 
-`RuleBasedMatcher` is the V1 implementation. A future `AIJobMatcher` or `HybridMatcher` can implement the same interface and be selected by the application service without changing job entities, source adapters, dashboard queries, or notification history.
+`RuleBasedMatcher` remains the deterministic V1 implementation. AI is a separate intelligence layer rather than a replacement for the matcher or scheduler.
+
+## AI configuration
+
+The AI provider is backend-only and optional. Never expose provider API keys to the browser.
+
+Configuration can be supplied through .NET configuration/environment variables. The current provider supports the OpenAI Responses API; provider-specific adapters can be added behind `IAiJobIntelligenceProvider` without changing the UI contract.
+
+No AI key is required for normal Job Radar scanning and matching.
 
 ## Source safety
 
