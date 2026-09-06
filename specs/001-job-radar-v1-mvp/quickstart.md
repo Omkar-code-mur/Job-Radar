@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # Quickstart: Greenhouse Public Job Ingestion
 
 ## Prerequisites
@@ -24,7 +26,7 @@ Invoke-RestMethod http://localhost:5000/api/healthz
 Expected result:
 
 ```json
-{"status":"ok"}
+{ "status": "ok" }
 ```
 
 ## Run the frontend
@@ -49,7 +51,7 @@ Open `http://localhost:5173`.
 8. Trigger **Scan all** and confirm one source failure does not hide successful source results.
 9. Confirm a repeated successful observation preserves `firstSeenAt` and updates `lastSeenAt`.
 10. Confirm a failed source reports its error and consecutive failure count, then a successful
-	fetch resets that count to zero.
+    fetch resets that count to zero.
 
 ## Contract checks
 

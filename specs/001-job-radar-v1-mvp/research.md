@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # Research: Greenhouse Public Job Ingestion
 
 ## Decision: Use the Greenhouse Job Board API

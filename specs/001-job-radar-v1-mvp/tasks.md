@@ -1,7 +1,8 @@
 ---
-
 description: "Task list for clarified Greenhouse public job ingestion"
 ---
+
+<!-- @format -->
 
 # Tasks: Greenhouse Public Job Ingestion
 
@@ -17,20 +18,20 @@ description: "Task list for clarified Greenhouse public job ingestion"
 
 **Purpose**: Establish focused verification coverage without changing unrelated product behavior.
 
-- [X] T001 [P] Add Greenhouse ingestion test folders and shared fixture-loading helpers in `artifacts/api-server-dotnet.tests/Sources/Greenhouse/GreenhouseTestFixture.cs`
-- [X] T002 [P] Add a representative mixed-validity Greenhouse response fixture covering duplicate observations, missing optional fields, and malformed records in `artifacts/api-server-dotnet.tests/Fixtures/greenhouse-ingestion-edge-cases.json`
-- [X] T003 Update the Greenhouse validation commands and expected composite-identity, `lastSeenAt`, and source-health checks in `specs/001-job-radar-v1-mvp/quickstart.md`
+- [x] T001 [P] Add Greenhouse ingestion test folders and shared fixture-loading helpers in `artifacts/api-server-dotnet.tests/Sources/Greenhouse/GreenhouseTestFixture.cs`
+- [x] T002 [P] Add a representative mixed-validity Greenhouse response fixture covering duplicate observations, missing optional fields, and malformed records in `artifacts/api-server-dotnet.tests/Fixtures/greenhouse-ingestion-edge-cases.json`
+- [x] T003 Update the Greenhouse validation commands and expected composite-identity, `lastSeenAt`, and source-health checks in `specs/001-job-radar-v1-mvp/quickstart.md`
 
 ## Phase 2: Foundational
 
 **Purpose**: Establish the normalized identity, persistence, and aggregate scan behavior required by US1.
 
-- [X] T004 Add `ExternalJobId` and `LastSeenAt` to the normalized job contract and ensure the scan result can carry per-source failures in `artifacts/api-server-dotnet/Program.cs`
-- [X] T005 Update PostgreSQL job schema, read/write mapping, and indexes so `(CompanyId, SourceId, ExternalJobId)` is unique while `FirstSeenAt` is preserved and `LastSeenAt` is updated in `artifacts/api-server-dotnet/Database/PostgresJobRadarStore.cs`
-- [X] T006 Update the OpenAPI job and scan-result schemas for `externalJobId`, `lastSeenAt`, and aggregate per-source failure details in `lib/api-spec/openapi.yaml`
-- [X] T007 Regenerate the derived React Query client and Zod schemas from the OpenAPI contract with `npm run codegen --workspace=@workspace/api-spec` in `lib/api-client-react/src/generated/` and `lib/api-zod/src/generated/`
-- [X] T008 Add source-health persistence logic that increments consecutive failures, records the latest error, and resets `failureCount` to zero after a successful fetch in `artifacts/api-server-dotnet/Database/PostgresJobRadarStore.cs`
-- [X] T009 Change multi-source scan orchestration to catch an individual source failure, update that source health, append per-source failure details, and continue remaining sources in `artifacts/api-server-dotnet/Database/PostgresJobRadarStore.cs`
+- [x] T004 Add `ExternalJobId` and `LastSeenAt` to the normalized job contract and ensure the scan result can carry per-source failures in `artifacts/api-server-dotnet/Program.cs`
+- [x] T005 Update PostgreSQL job schema, read/write mapping, and indexes so `(CompanyId, SourceId, ExternalJobId)` is unique while `FirstSeenAt` is preserved and `LastSeenAt` is updated in `artifacts/api-server-dotnet/Database/PostgresJobRadarStore.cs`
+- [x] T006 Update the OpenAPI job and scan-result schemas for `externalJobId`, `lastSeenAt`, and aggregate per-source failure details in `lib/api-spec/openapi.yaml`
+- [x] T007 Regenerate the derived React Query client and Zod schemas from the OpenAPI contract with `npm run codegen --workspace=@workspace/api-spec` in `lib/api-client-react/src/generated/` and `lib/api-zod/src/generated/`
+- [x] T008 Add source-health persistence logic that increments consecutive failures, records the latest error, and resets `failureCount` to zero after a successful fetch in `artifacts/api-server-dotnet/Database/PostgresJobRadarStore.cs`
+- [x] T009 Change multi-source scan orchestration to catch an individual source failure, update that source health, append per-source failure details, and continue remaining sources in `artifacts/api-server-dotnet/Database/PostgresJobRadarStore.cs`
 
 **Checkpoint**: The API has a stable composite job identity, explicit first/last observation timestamps, truthful consecutive source health, and an aggregate scan result that can represent partial failure.
 
@@ -42,29 +43,29 @@ description: "Task list for clarified Greenhouse public job ingestion"
 
 ### Tests for User Story 1
 
-- [X] T010 [P] [US1] Extend Greenhouse normalizer tests for required-field validation, optional-field defaults, HTML-to-text conversion, external ID mapping, and diagnostic output in `artifacts/api-server-dotnet.tests/Sources/Greenhouse/GreenhouseNormalizerTests.cs`
+- [x] T010 [P] [US1] Extend Greenhouse normalizer tests for required-field validation, optional-field defaults, HTML-to-text conversion, external ID mapping, and diagnostic output in `artifacts/api-server-dotnet.tests/Sources/Greenhouse/GreenhouseNormalizerTests.cs`
 - [ ] T011 [P] [US1] Add PostgreSQL-backed upsert tests proving composite identity deduplication, stable `firstSeenAt`, updated `lastSeenAt`, and mutable-field refresh in `artifacts/api-server-dotnet.tests/Database/PostgresJobRadarStoreIngestionTests.cs`
 - [ ] T012 [P] [US1] Add source-health tests proving consecutive failure increments, latest error recording, successful reset, and zero-job successful fetch behavior in `artifacts/api-server-dotnet.tests/Database/SourceHealthTests.cs`
 - [ ] T013 [P] [US1] Add aggregate scan tests proving one failing source does not abort successful sources and per-source failure details are returned in `artifacts/api-server-dotnet.tests/Api/GreenhouseIngestionEndpointTests.cs`
-- [X] T014 [P] [US1] Add HTTP behavior tests for Greenhouse timeout, transient status retries, bounded retry exhaustion, truthful user-agent, and malformed JSON in `artifacts/api-server-dotnet.tests/Sources/Greenhouse/GreenhouseHttpClientTests.cs`
+- [x] T014 [P] [US1] Add HTTP behavior tests for Greenhouse timeout, transient status retries, bounded retry exhaustion, truthful user-agent, and malformed JSON in `artifacts/api-server-dotnet.tests/Sources/Greenhouse/GreenhouseHttpClientTests.cs`
 - [ ] T015 [P] [US1] Add API contract tests for source scan, jobs, dashboard, and source-health responses with the new fields in `artifacts/api-server-dotnet.tests/Api/GreenhouseIngestionEndpointTests.cs`
 
 ### Implementation for User Story 1
 
-- [X] T016 [US1] Update Greenhouse DTO mapping and normalization to retain the source external job ID, normalized metadata, and observation timestamps in `artifacts/api-server-dotnet/Sources/Greenhouse/GreenhouseDtos.cs` and `artifacts/api-server-dotnet/Sources/Greenhouse/GreenhouseNormalizer.cs`
-- [X] T017 [US1] Update Greenhouse fetch diagnostics so malformed individual records are skipped with source-level diagnostic information while valid records continue in `artifacts/api-server-dotnet/Sources/Greenhouse/GreenhouseJobSource.cs`
-- [X] T018 [US1] Update source creation and validation to accept only the public Greenhouse board URL/token configuration required by this slice and reject credential-like configuration in `artifacts/api-server-dotnet/Database/PostgresJobRadarStore.cs`
-- [X] T019 [US1] Connect the updated scan result and source-health fields to the existing single-source and scan-all endpoints without changing unrelated API behavior in `artifacts/api-server-dotnet/Program.cs`
-- [X] T020 [US1] Update the jobs, dashboard, and source-health frontend views to display the new ingestion fields and aggregate scan failures without adding matching or notification behavior in `artifacts/job-radar/src/App.tsx`
-- [X] T021 [US1] Update the Greenhouse contract and data-model documentation with the final response fields, composite identity, last-seen semantics, and consecutive failure reset in `specs/001-job-radar-v1-mvp/contracts/greenhouse-source.md` and `specs/001-job-radar-v1-mvp/data-model.md`
+- [x] T016 [US1] Update Greenhouse DTO mapping and normalization to retain the source external job ID, normalized metadata, and observation timestamps in `artifacts/api-server-dotnet/Sources/Greenhouse/GreenhouseDtos.cs` and `artifacts/api-server-dotnet/Sources/Greenhouse/GreenhouseNormalizer.cs`
+- [x] T017 [US1] Update Greenhouse fetch diagnostics so malformed individual records are skipped with source-level diagnostic information while valid records continue in `artifacts/api-server-dotnet/Sources/Greenhouse/GreenhouseJobSource.cs`
+- [x] T018 [US1] Update source creation and validation to accept only the public Greenhouse board URL/token configuration required by this slice and reject credential-like configuration in `artifacts/api-server-dotnet/Database/PostgresJobRadarStore.cs`
+- [x] T019 [US1] Connect the updated scan result and source-health fields to the existing single-source and scan-all endpoints without changing unrelated API behavior in `artifacts/api-server-dotnet/Program.cs`
+- [x] T020 [US1] Update the jobs, dashboard, and source-health frontend views to display the new ingestion fields and aggregate scan failures without adding matching or notification behavior in `artifacts/job-radar/src/App.tsx`
+- [x] T021 [US1] Update the Greenhouse contract and data-model documentation with the final response fields, composite identity, last-seen semantics, and consecutive failure reset in `specs/001-job-radar-v1-mvp/contracts/greenhouse-source.md` and `specs/001-job-radar-v1-mvp/data-model.md`
 
 **Checkpoint**: US1 is independently usable when a permitted Greenhouse board is configured; valid roles appear once in the existing jobs workspace, repeated observations refresh `lastSeenAt`, source health is truthful, and partial scans preserve successful results.
 
 ## Phase 4: Polish and Cross-Cutting Verification
 
-- [X] T022 [P] Add structured ingestion logs for fetch start/end, malformed-record counts, upsert counts, source failures, and aggregate scan completion in `artifacts/api-server-dotnet/Program.cs` and `artifacts/api-server-dotnet/Sources/Greenhouse/GreenhouseJobSource.cs`
-- [X] T023 [P] Document that matching, notifications, email delivery, and scheduling are outside this feature and link the repository reconciliation in `specs/001-job-radar-v1-mvp/plan.md` and `specs/001-job-radar-v1-mvp/reconciliation.md`
-- [X] T024 Run the focused backend ingestion tests, shared library typecheck, frontend typecheck/build, and backend build; record the results in `specs/001-job-radar-v1-mvp/quickstart.md`
+- [x] T022 [P] Add structured ingestion logs for fetch start/end, malformed-record counts, upsert counts, source failures, and aggregate scan completion in `artifacts/api-server-dotnet/Program.cs` and `artifacts/api-server-dotnet/Sources/Greenhouse/GreenhouseJobSource.cs`
+- [x] T023 [P] Document that matching, notifications, email delivery, and scheduling are outside this feature and link the repository reconciliation in `specs/001-job-radar-v1-mvp/plan.md` and `specs/001-job-radar-v1-mvp/reconciliation.md`
+- [x] T024 Run the focused backend ingestion tests, shared library typecheck, frontend typecheck/build, and backend build; record the results in `specs/001-job-radar-v1-mvp/quickstart.md`
 
 ## Dependencies and Execution Order
 

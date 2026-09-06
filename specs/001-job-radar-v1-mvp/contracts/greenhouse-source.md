@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # Greenhouse Source Contract
 
 ## Configuration

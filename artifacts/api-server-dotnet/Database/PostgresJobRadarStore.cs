@@ -147,7 +147,7 @@ public sealed class PostgresJobRadarStore
         if (string.Equals(source.Type, "GREENHOUSE_API", StringComparison.OrdinalIgnoreCase)
             && (string.IsNullOrWhiteSpace(boardToken) || !Uri.TryCreate(updatedUrl, UriKind.Absolute, out var boardUri)
                 || !boardUri.Host.Equals("boards.greenhouse.io", StringComparison.OrdinalIgnoreCase)))
-            return null;
+            throw new SourceConfigurationException("Greenhouse source requires a public boards.greenhouse.io URL and boardToken.");
         var updated = source with { Name = input.Name ?? source.Name, Url = updatedUrl, Enabled = input.Enabled ?? source.Enabled, BoardToken = boardToken };
         await using var connection = await OpenAsync(cancellationToken); await using var command = new NpgsqlCommand("update sources set name=@name,url=@url,enabled=@enabled,board_token=@token where id=@id", connection); Add(command, "id", id); Add(command, "name", updated.Name); Add(command, "url", updated.Url); Add(command, "enabled", updated.Enabled); Add(command, "token", (object?)updated.BoardToken ?? DBNull.Value); await command.ExecuteNonQueryAsync(cancellationToken); return updated;
     }
