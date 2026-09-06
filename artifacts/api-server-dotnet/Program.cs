@@ -23,6 +23,9 @@ builder.Services.AddHttpClient<DeloitteUsiJobSource>(client => { client.Timeout 
 builder.Services.AddScoped<IJobSourceFetcher, GreenhouseJobSource>();
 builder.Services.AddScoped<IJobSourceFetcher, DeloitteUsiJobSource>();
 builder.Services.AddScoped<JobSourceFetcherFactory>();
+builder.Services.AddScoped<AiJobIntelligenceService>();
+builder.Services.AddScoped<OpenRouterAiJobIntelligenceProvider>();
+builder.Services.AddScoped<AiJobIntelligenceProviderFactory>();
 var connectionString = builder.Configuration["ConnectionStrings:DefaultConnection"] ?? builder.Configuration["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
 if (string.IsNullOrWhiteSpace(connectionString)) throw new InvalidOperationException("DATABASE_URL must be configured.");
 var baseStore = new PostgresJobRadarStore(connectionString);
@@ -68,6 +71,32 @@ api.MapDelete("/sources/{id}", async (HttpContext context, string id, Cancellati
 api.MapPost("/sources/{id}/scan", async (string id, HttpContext context, JobSourceFetcherFactory sourceFetcherFactory, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user?.Role != "ADMIN") return Results.Forbid(); return Results.Ok(await store.ScanAsync(user.Id, [id], sourceFetcherFactory, ct)); });
 api.MapGet("/jobs", async (HttpContext context, string? search, string? status, string? location, string? workplaceType, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(await store.GetJobsAsync(user.Id, search, status, location, workplaceType, ct)); });
 api.MapGet("/jobs/{id}", async (HttpContext context, string id, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user is null) return Results.Unauthorized(); var job = await store.GetJobAsync(user.Id, id, ct); return job is null ? Results.NotFound(new { error = "Job not found." }) : Results.Ok(job); });
+api.MapPost("/jobs/{id}/ai-analysis", async (HttpContext context, string id, AiJobIntelligenceProviderFactory providerFactory, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    if (user is null) return Results.Unauthorized();
+
+    var job = await store.GetJobAsync(user.Id, id, ct);
+    if (job is null) return Results.NotFound(new { error = "Job not found." });
+
+    var profile = await store.GetProfileAsync(user.Id, ct);
+    if (profile is null) return Results.BadRequest(new { error = "Complete your profile before using AI job analysis." });
+
+    try
+    {
+        var provider = providerFactory.Create();
+        var analysis = await provider.AnalyzeAsync(job, profile, ct);
+        return Results.Ok(new { provider = provider.Name, analysis });
+    }
+    catch (AiNotConfiguredException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (AiProviderException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status502BadGateway);
+    }
+});
 api.MapGet("/profile", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(await store.GetProfileAsync(user.Id, ct)); });
 api.MapPut("/profile", async (HttpContext context, ProfileInput input, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(await store.SaveProfileAsync(user.Id, input, ct)); });
 api.MapGet("/profile/import/prompt", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(new { prompt = ProfileImportService.Prompt, schemaVersion = "1.0" }); });

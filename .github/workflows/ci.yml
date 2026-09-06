@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore artifacts/api-server-dotnet/JobRadar.Api.csproj
+      - name: Build
+        run: dotnet build artifacts/api-server-dotnet/JobRadar.Api.csproj --no-restore --configuration Release
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build TypeScript project references
+        run: npm run typecheck:libs
+      - name: Typecheck
+        run: npm run typecheck --workspace=@workspace/job-radar
+      - name: Build
+        run: npm run build --workspace=@workspace/job-radar
