@@ -21,7 +21,6 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 
-const queryClient = new QueryClient();
 const navGroups = [
   { label: 'Monitor', items: [
     { href: '/', label: 'Overview', icon: LayoutDashboard },
@@ -508,6 +507,8 @@ function Router() {
   return <ErrorBoundary resetKey={location}><Layout><Switch><Route path="/" component={Dashboard} /><Route path="/companies" component={Companies} /><Route path="/sources" component={() => <Sources />} /><Route path="/jobs" component={Jobs} /><Route path="/jobs/:id" component={JobDetail} /><Route path="/profile" component={Profile} /><Route path="/matching" component={Matching} /><Route path="/notifications" component={Notifications} /><Route path="/source-health" component={() => <Sources healthOnly />} /><Route component={NotFound} /></Switch></Layout></ErrorBoundary>;
 }
 function App() {
+  const [queryClient] = useState(() => new QueryClient());
+
   return <QueryClientProvider client={queryClient}><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><Router /></WouterRouter><Toaster /></TooltipProvider></QueryClientProvider>;
 }
 export default App;
