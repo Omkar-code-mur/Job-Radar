@@ -26,6 +26,7 @@ builder.Services.AddScoped<JobSourceFetcherFactory>();
 builder.Services.AddScoped<AiJobIntelligenceService>();
 builder.Services.AddScoped<OpenRouterAiJobIntelligenceProvider>();
 builder.Services.AddScoped<AiJobIntelligenceProviderFactory>();
+builder.Services.AddScoped<BulkEmailService>();
 var connectionString = builder.Configuration["ConnectionStrings:DefaultConnection"] ?? builder.Configuration["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
 if (string.IsNullOrWhiteSpace(connectionString)) throw new InvalidOperationException("DATABASE_URL must be configured.");
 var baseStore = new PostgresJobRadarStore(connectionString);
@@ -130,6 +131,23 @@ api.MapPost("/profile/import/confirm", async (HttpContext context, JsonElement i
 api.MapGet("/matching", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(await store.GetMatchingAsync(user.Id, ct)); });
 api.MapPut("/matching", async (HttpContext context, MatchingConfiguration input, CancellationToken ct) => { var total = input.RoleWeight + input.SkillsWeight + input.ExperienceWeight + input.LocationWeight + input.AiWeight + input.FreshnessWeight; if (input.Threshold is < 0 or > 100 || total != 100) return Results.BadRequest(new { error = "Scoring weights must total 100." }); var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user is null) return Results.Unauthorized(); await store.SaveMatchingAsync(user.Id, input, ct); return Results.Ok(input); });
 api.MapGet("/notifications", async (CancellationToken ct) => Results.Ok(await store.GetNotificationsAsync(ct)));
+api.MapPost("/bulk-email/send", async (HttpContext context, BulkEmailSendRequest input, BulkEmailService service, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    if (user is null) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await service.SendAsync(input, ct));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
 api.MapGet("/applications", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(await workspaceStore.GetApplicationsAsync(user.Id, ct)); });
 api.MapPut("/applications/{jobId}", async (HttpContext context, string jobId, ApplicationInput input, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user is null) return Results.Unauthorized(); try { var application = await workspaceStore.UpsertApplicationAsync(user.Id, jobId, input, ct); return application is null ? Results.NotFound(new { error = "Job not found." }) : Results.Ok(application); } catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); } });
 api.MapGet("/dream-companies", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user is null) return Results.Unauthorized(); var dreamCompanies = await workspaceStore.GetDreamCompaniesAsync(user.Id, ct); if (user.Role == "ADMIN") return Results.Ok(dreamCompanies); var sources = await store.GetSourcesAsync(ct); var ids = sources.Where(IsMonitorableSource).Select(source => source.CompanyId).ToHashSet(StringComparer.Ordinal); return Results.Ok(dreamCompanies.Where(company => ids.Contains(company.Id))); });
