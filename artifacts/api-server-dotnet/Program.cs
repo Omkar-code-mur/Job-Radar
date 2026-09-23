@@ -26,6 +26,7 @@ builder.Services.AddScoped<JobSourceFetcherFactory>();
 builder.Services.AddScoped<AiJobIntelligenceService>();
 builder.Services.AddScoped<OpenRouterAiJobIntelligenceProvider>();
 builder.Services.AddScoped<AiJobIntelligenceProviderFactory>();
+builder.Services.AddScoped<BulkEmailService>();
 var connectionString = builder.Configuration["ConnectionStrings:DefaultConnection"] ?? builder.Configuration["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
 if (string.IsNullOrWhiteSpace(connectionString)) throw new InvalidOperationException("DATABASE_URL must be configured.");
 var baseStore = new PostgresJobRadarStore(connectionString);
@@ -130,6 +131,23 @@ api.MapPost("/profile/import/confirm", async (HttpContext context, JsonElement i
 api.MapGet("/matching", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(await store.GetMatchingAsync(user.Id, ct)); });
 api.MapPut("/matching", async (HttpContext context, MatchingConfiguration input, CancellationToken ct) => { var total = input.RoleWeight + input.SkillsWeight + input.ExperienceWeight + input.LocationWeight + input.AiWeight + input.FreshnessWeight; if (input.Threshold is < 0 or > 100 || total != 100) return Results.BadRequest(new { error = "Scoring weights must total 100." }); var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user is null) return Results.Unauthorized(); await store.SaveMatchingAsync(user.Id, input, ct); return Results.Ok(input); });
 api.MapGet("/notifications", async (CancellationToken ct) => Results.Ok(await store.GetNotificationsAsync(ct)));
+api.MapPost("/bulk-email/send", async (HttpContext context, BulkEmailSendRequest input, BulkEmailService service, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct);
+    if (user is null) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await service.SendAsync(input, ct));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
 api.MapGet("/applications", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(await workspaceStore.GetApplicationsAsync(user.Id, ct)); });
 api.MapPut("/applications/{jobId}", async (HttpContext context, string jobId, ApplicationInput input, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user is null) return Results.Unauthorized(); try { var application = await workspaceStore.UpsertApplicationAsync(user.Id, jobId, input, ct); return application is null ? Results.NotFound(new { error = "Job not found." }) : Results.Ok(application); } catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); } });
 api.MapGet("/dream-companies", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user is null) return Results.Unauthorized(); var dreamCompanies = await workspaceStore.GetDreamCompaniesAsync(user.Id, ct); if (user.Role == "ADMIN") return Results.Ok(dreamCompanies); var sources = await store.GetSourcesAsync(ct); var ids = sources.Where(IsMonitorableSource).Select(source => source.CompanyId).ToHashSet(StringComparer.Ordinal); return Results.Ok(dreamCompanies.Where(company => ids.Contains(company.Id))); });
@@ -159,3 +177,103 @@ public sealed class ScanRequestException(int statusCode, string message) : Excep
     public int StatusCode { get; } = statusCode;
 }
 public sealed class SourceConfigurationException(string message) : Exception(message);
+
+public sealed class BulkEmailService(IConfiguration configuration, ILogger<BulkEmailService> logger)
+{
+    public async Task<BulkEmailSendResult> SendAsync(BulkEmailSendRequest request, CancellationToken ct)
+    {
+        if (request.Contacts is null || request.Contacts.Count is < 1 or > 50)
+            throw new ArgumentException("Each send must contain between 1 and 50 contacts.");
+        if (string.IsNullOrWhiteSpace(request.Subject) || string.IsNullOrWhiteSpace(request.Body))
+            throw new ArgumentException("Subject and body are required.");
+
+        var host = configuration["SMTP_HOST"] ?? Environment.GetEnvironmentVariable("SMTP_HOST");
+        var username = configuration["SMTP_USERNAME"] ?? Environment.GetEnvironmentVariable("SMTP_USERNAME");
+        var password = configuration["SMTP_PASSWORD"] ?? Environment.GetEnvironmentVariable("SMTP_PASSWORD");
+        var fromEmail = configuration["SMTP_FROM_EMAIL"] ?? Environment.GetEnvironmentVariable("SMTP_FROM_EMAIL") ?? username;
+        var fromName = configuration["SMTP_FROM_NAME"] ?? Environment.GetEnvironmentVariable("SMTP_FROM_NAME") ?? "Job Radar";
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(fromEmail))
+            throw new InvalidOperationException("SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD and SMTP_FROM_EMAIL.");
+
+        var portText = configuration["SMTP_PORT"] ?? Environment.GetEnvironmentVariable("SMTP_PORT");
+        var port = int.TryParse(portText, out var parsedPort) ? parsedPort : 587;
+        var useSslText = configuration["SMTP_USE_SSL"] ?? Environment.GetEnvironmentVariable("SMTP_USE_SSL");
+        var useSsl = !string.Equals(useSslText, "false", StringComparison.OrdinalIgnoreCase);
+
+        using var smtp = new System.Net.Mail.SmtpClient(host, port)
+        {
+            EnableSsl = useSsl,
+            Credentials = new System.Net.NetworkCredential(username, password),
+            DeliveryMethod = System.Net.Mail.SmtpDeliveryMethod.Network
+        };
+
+        var sent = new List<string>();
+        var failed = new List<BulkEmailFailure>();
+        foreach (var contact in request.Contacts)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(contact.Email) || string.IsNullOrWhiteSpace(contact.Name) || string.IsNullOrWhiteSpace(contact.Company))
+            {
+                failed.Add(new(contact.Email ?? string.Empty, "Missing name, email, or company."));
+                continue;
+            }
+
+            var subject = Render(contact, request.Subject);
+            var body = Render(contact, request.Body);
+            try
+            {
+                using var message = new System.Net.Mail.MailMessage
+                {
+                    From = new System.Net.Mail.MailAddress(fromEmail, fromName),
+                    Subject = subject,
+                    Body = body,
+                    IsBodyHtml = false
+                };
+                message.To.Add(new System.Net.Mail.MailAddress(contact.Email, contact.Name));
+                if (request.Attachment is not null)
+                {
+                    if (string.IsNullOrWhiteSpace(request.Attachment.FileName) || string.IsNullOrWhiteSpace(request.Attachment.Base64Data))
+                        throw new ArgumentException("Resume attachment is invalid.");
+                    byte[] bytes;
+                    try { bytes = Convert.FromBase64String(request.Attachment.Base64Data); }
+                    catch (FormatException) { throw new ArgumentException("Resume attachment data is invalid."); }
+                    if (bytes.Length > 5 * 1024 * 1024)
+                        throw new ArgumentException("Resume attachment must be 5 MB or smaller.");
+                    using var attachmentStream = new MemoryStream(bytes, writable: false);
+                    using var attachment = new System.Net.Mail.Attachment(attachmentStream, request.Attachment.FileName, request.Attachment.ContentType);
+                    message.Attachments.Add(attachment);
+                    await smtp.SendMailAsync(message, ct);
+                }
+                else
+                {
+                    await smtp.SendMailAsync(message, ct);
+                }
+                sent.Add(contact.Email);
+                logger.LogInformation("Bulk outreach email sent to {Recipient}", contact.Email);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Bulk outreach email failed for {Recipient}", contact.Email);
+                failed.Add(new(contact.Email, ex.Message));
+            }
+        }
+
+        return new BulkEmailSendResult(sent.Count, failed.Count, sent, failed);
+    }
+
+    private static string Render(BulkEmailContact contact, string template)
+    {
+        var firstName = contact.Name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? contact.Name;
+        return template
+            .Replace("{{firstName}}", firstName, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{name}}", contact.Name, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{company}}", contact.Company, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{role}}", contact.Role ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+public record BulkEmailContact(string Name, string Email, string? Role, string Company);
+public record BulkEmailAttachment(string FileName, string ContentType, string Base64Data);
+public record BulkEmailSendRequest(IReadOnlyList<BulkEmailContact> Contacts, string Subject, string Body, BulkEmailAttachment? Attachment = null);
+public record BulkEmailFailure(string Email, string Error);
+public record BulkEmailSendResult(int Sent, int Failed, IReadOnlyList<string> SentEmails, IReadOnlyList<BulkEmailFailure> Failures);

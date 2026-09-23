@@ -20,6 +20,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
+import BulkEmailPage from './BulkEmailPage';
 
 const queryClient = new QueryClient();
 const navGroups = [
@@ -28,6 +29,7 @@ const navGroups = [
     { href: '/jobs', label: 'Jobs', icon: BriefcaseBusiness },
     { href: '/companies', label: 'Companies', icon: Building2 },
     { href: '/sources', label: 'Sources', icon: Globe2 },
+    { href: '/bulk-email', label: 'Bulk email', icon: Mail },
   ]},
   { label: 'Tune', items: [
     { href: '/profile', label: 'Candidate profile', icon: UserRound },
@@ -505,7 +507,7 @@ function Notifications() {
 
 function Router() {
   const [location] = useLocation();
-  return <ErrorBoundary resetKey={location}><Layout><Switch><Route path="/" component={Dashboard} /><Route path="/companies" component={Companies} /><Route path="/sources" component={() => <Sources />} /><Route path="/jobs" component={Jobs} /><Route path="/jobs/:id" component={JobDetail} /><Route path="/profile" component={Profile} /><Route path="/matching" component={Matching} /><Route path="/notifications" component={Notifications} /><Route path="/source-health" component={() => <Sources healthOnly />} /><Route component={NotFound} /></Switch></Layout></ErrorBoundary>;
+  return <ErrorBoundary resetKey={location}><Layout><Switch><Route path="/" component={Dashboard} /><Route path="/companies" component={Companies} /><Route path="/sources" component={() => <Sources />} /><Route path="/jobs" component={Jobs} /><Route path="/jobs/:id" component={JobDetail} /><Route path="/profile" component={Profile} /><Route path="/matching" component={Matching} /><Route path="/notifications" component={Notifications} /><Route path="/bulk-email" component={BulkEmailPage} /><Route path="/source-health" component={() => <Sources healthOnly />} /><Route component={NotFound} /></Switch></Layout></ErrorBoundary>;
 }
 function App() {
   return <QueryClientProvider client={queryClient}><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><Router /></WouterRouter><Toaster /></TooltipProvider></QueryClientProvider>;
