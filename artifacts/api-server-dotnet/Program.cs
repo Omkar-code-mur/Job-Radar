@@ -230,7 +230,24 @@ public sealed class BulkEmailService(IConfiguration configuration, ILogger<BulkE
                     IsBodyHtml = false
                 };
                 message.To.Add(new System.Net.Mail.MailAddress(contact.Email, contact.Name));
-                await smtp.SendMailAsync(message, ct);
+                if (request.Attachment is not null)
+                {
+                    if (string.IsNullOrWhiteSpace(request.Attachment.FileName) || string.IsNullOrWhiteSpace(request.Attachment.Base64Data))
+                        throw new ArgumentException("Resume attachment is invalid.");
+                    byte[] bytes;
+                    try { bytes = Convert.FromBase64String(request.Attachment.Base64Data); }
+                    catch (FormatException) { throw new ArgumentException("Resume attachment data is invalid."); }
+                    if (bytes.Length > 5 * 1024 * 1024)
+                        throw new ArgumentException("Resume attachment must be 5 MB or smaller.");
+                    using var attachmentStream = new MemoryStream(bytes, writable: false);
+                    using var attachment = new System.Net.Mail.Attachment(attachmentStream, request.Attachment.FileName, request.Attachment.ContentType);
+                    message.Attachments.Add(attachment);
+                    await smtp.SendMailAsync(message, ct);
+                }
+                else
+                {
+                    await smtp.SendMailAsync(message, ct);
+                }
                 sent.Add(contact.Email);
                 logger.LogInformation("Bulk outreach email sent to {Recipient}", contact.Email);
             }
@@ -256,6 +273,7 @@ public sealed class BulkEmailService(IConfiguration configuration, ILogger<BulkE
 }
 
 public record BulkEmailContact(string Name, string Email, string? Role, string Company);
-public record BulkEmailSendRequest(IReadOnlyList<BulkEmailContact> Contacts, string Subject, string Body);
+public record BulkEmailAttachment(string FileName, string ContentType, string Base64Data);
+public record BulkEmailSendRequest(IReadOnlyList<BulkEmailContact> Contacts, string Subject, string Body, BulkEmailAttachment? Attachment = null);
 public record BulkEmailFailure(string Email, string Error);
 public record BulkEmailSendResult(int Sent, int Failed, IReadOnlyList<string> SentEmails, IReadOnlyList<BulkEmailFailure> Failures);
