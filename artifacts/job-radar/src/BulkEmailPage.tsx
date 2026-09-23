@@ -3,6 +3,10 @@ import { Mail, Send, Upload, Users } from 'lucide-react';
 import { DEFAULT_EMAIL_TEMPLATES, chunk, parseContacts, renderTemplate, type BulkEmailContact } from './bulkEmail';
 
 const SESSION_KEY='jobradar.supabase.session';
+const RESUME_KEY='jobradar.bulkEmail.resume';
+const MAX_RESUME_BYTES=5*1024*1024;
+
+type SavedResume = { fileName: string; contentType: string; base64Data: string; size: number };
 function token(){try{return (JSON.parse(sessionStorage.getItem(SESSION_KEY)||'{}') as {access_token?:string}).access_token||''}catch{return ''}}
 
 export default function BulkEmailPage() {
@@ -14,6 +18,10 @@ export default function BulkEmailPage() {
   const [batchIndex, setBatchIndex] = useState(0);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resume, setResume] = useState<SavedResume | null>(() => {
+    try { return JSON.parse(localStorage.getItem(RESUME_KEY) || 'null') as SavedResume | null; } catch { return null; }
+  });
+  const [resumeError, setResumeError] = useState('');
 
   const parsed = useMemo(() => {
     if (!raw.trim()) return { contacts: [] as BulkEmailContact[], error: '' };
@@ -35,6 +43,27 @@ export default function BulkEmailPage() {
     setRaw(await file.text()); setBatchIndex(0);
   }
 
+  async function importResume(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setResumeError('');
+    if (file.size > MAX_RESUME_BYTES) { setResumeError('Resume must be 5 MB or smaller.'); return; }
+    const allowed = ['application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!allowed.includes(file.type) && !/\.(pdf|doc|docx)$/i.test(file.name)) { setResumeError('Upload a PDF, DOC, or DOCX resume.'); return; }
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(new Error('Could not read resume.'));
+      reader.readAsDataURL(file);
+    });
+    const saved = { fileName: file.name, contentType: file.type || 'application/octet-stream', base64Data, size: file.size };
+    localStorage.setItem(RESUME_KEY, JSON.stringify(saved));
+    setResume(saved);
+  }
+
+  function removeResume() { localStorage.removeItem(RESUME_KEY); setResume(null); setResumeError(''); }
+
   async function sendBatch() {
     if (!currentBatch.length) return;
     setBusy(true); setStatus('');
@@ -42,7 +71,7 @@ export default function BulkEmailPage() {
       const r = await fetch('/api/bulk-email/send', {
         method: 'POST',
         headers: { 'Content-Type':'application/json', 'Authorization':'Bearer ' + token() },
-        body: JSON.stringify({ contacts: currentBatch, subject, body }),
+        body: JSON.stringify({ contacts: currentBatch, subject, body, attachment: resume ? { fileName: resume.fileName, contentType: resume.contentType, base64Data: resume.base64Data } : null }),
       });
       const data = await r.json().catch(()=>({}));
       if (!r.ok) throw new Error(data?.detail || data?.error || 'Send failed.');
@@ -71,7 +100,16 @@ export default function BulkEmailPage() {
     </div>
 
     <div className="mt-6 grid gap-6 xl:grid-cols-[.7fr_1.3fr]">
-      <section className="card p-5"><h2 className="font-bold">3. Batch controls</h2><label className="label mt-4">Batch size</label>
+      <section className="card p-5"><h2 className="font-bold">3. Resume & batch controls</h2>
+        <div className="mt-4 rounded-xl border border-dashed p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div><div className="text-sm font-semibold">Resume attachment</div><div className="mt-1 text-xs text-muted-foreground">Attach your resume automatically to every outreach email. PDF, DOC, DOCX · max 5 MB.</div></div>
+            <label className="btn btn-ghost cursor-pointer"><Upload size={15}/>{resume ? 'Replace' : 'Upload resume'}<input className="hidden" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={importResume}/></label>
+          </div>
+          {resume && <div className="mt-3 flex items-center justify-between rounded-lg bg-secondary px-3 py-2 text-xs"><span className="truncate">{resume.fileName} · {(resume.size/1024/1024).toFixed(2)} MB</span><button className="font-semibold text-destructive" onClick={removeResume}>Remove</button></div>}
+          {resumeError && <p className="mt-3 text-xs text-destructive">{resumeError}</p>}
+        </div>
+        <label className="label mt-4">Batch size</label>
         <select className="field" value={batchSize} onChange={e=>{setBatchSize(Number(e.target.value));setBatchIndex(0)}}>{[10,20,30].map(n=><option key={n} value={n}>{n} recipients</option>)}</select>
         <div className="mt-4 rounded-xl bg-secondary p-4 text-sm"><div className="font-bold">Batch {batches.length ? batchIndex+1 : 0} of {batches.length}</div><div className="mt-1 text-xs text-muted-foreground">{currentBatch.length} recipient(s) in the current batch.</div></div>
         <div className="mt-3 flex gap-2"><button className="btn btn-ghost flex-1" disabled={batchIndex===0} onClick={()=>setBatchIndex(i=>Math.max(0,i-1))}>Previous</button><button className="btn btn-ghost flex-1" disabled={batchIndex>=batches.length-1} onClick={()=>setBatchIndex(i=>Math.min(batches.length-1,i+1))}>Next</button></div>
