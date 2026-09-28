@@ -8,8 +8,9 @@ type Profile = { id:string; roles:string[]; skills:string[]; technologies:string
 type Application = { id:string; jobId:string; company:string; title:string; location:string; applicationUrl:string; status:string; appliedAt?:string; resumeVersion?:string; notes?:string; followUpAt?:string; updatedAt:string };
 type WorkspaceSettings = { showNotifications:boolean; showMatching:boolean };
 const SESSION_KEY='jobradar.supabase.session';
+const API_BASE=((import.meta.env.VITE_API_URL as string|undefined)?.trim()||'https://job-radar-nfgv.onrender.com').replace(/\/+$/,'');
 function token(){try{return (JSON.parse(sessionStorage.getItem(SESSION_KEY)||'{}') as {access_token?:string}).access_token||''}catch{return ''}}
-async function api<T>(path:string,init:RequestInit={}):Promise<T>{const headers=new Headers(init.headers);headers.set('Authorization',`Bearer ${token()}`);headers.set('Content-Type','application/json');const r=await fetch(`/api${path}`,{...init,headers});if(!r.ok)throw new Error(await r.text()||`Request failed (${r.status})`);return r.status===204?undefined as T:await r.json()}
+async function api<T>(path:string,init:RequestInit={}):Promise<T>{const headers=new Headers(init.headers);headers.set('Authorization',`Bearer ${token()}`);headers.set('Content-Type','application/json');const r=await fetch(`${API_BASE}/api${path}`,{...init,headers});if(!r.ok)throw new Error(await r.text()||`Request failed (${r.status})`);return r.status===204?undefined as T:await r.json()}
 function date(v?:string){return v?new Intl.DateTimeFormat('en',{month:'short',day:'numeric'}).format(new Date(v)):'—'}
 function rel(v?:string){if(!v)return '—';const d=Date.now()-new Date(v).getTime();if(d<3600000)return `${Math.max(1,Math.round(d/60000))}m`;if(d<86400000)return `${Math.round(d/3600000)}h`;return `${Math.round(d/86400000)}d`}
 function split(v:string){return v.split(',').map(x=>x.trim()).filter(Boolean)}
