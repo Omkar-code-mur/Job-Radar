@@ -3,8 +3,9 @@ import { Settings2, X } from 'lucide-react';
 import App from './App';
 
 const SESSION_KEY='jobradar.supabase.session';
+const API_BASE=((import.meta.env.VITE_API_URL as string|undefined)?.trim()||'https://job-radar-nfgv.onrender.com').replace(/\/+$/,'');
 function token(){try{return (JSON.parse(sessionStorage.getItem(SESSION_KEY)||'{}') as {access_token?:string}).access_token||''}catch{return ''}}
-async function api<T>(path:string,init:RequestInit={}):Promise<T>{const headers=new Headers(init.headers);headers.set('Authorization',`Bearer ${token()}`);headers.set('Content-Type','application/json');const r=await fetch(`/api${path}`,{...init,headers});if(!r.ok)throw new Error(await r.text()||`Request failed (${r.status})`);return r.status===204?undefined as T:await r.json()}
+async function api<T>(path:string,init:RequestInit={}):Promise<T>{const headers=new Headers(init.headers);headers.set('Authorization',`Bearer ${token()}`);headers.set('Content-Type','application/json');const r=await fetch(`${API_BASE}/api${path}`,{...init,headers});if(!r.ok)throw new Error(await r.text()||`Request failed (${r.status})`);return r.status===204?undefined as T:await r.json()}
 
 type Me={role:string};
 type Settings={showNotifications:boolean;showMatching:boolean};
