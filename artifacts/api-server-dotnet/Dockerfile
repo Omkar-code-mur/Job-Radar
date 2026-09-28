@@ -1,7 +1,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-COPY . .
+COPY artifacts/api-server-dotnet/ .
 RUN dotnet restore "JobRadar.Api.csproj"
 RUN dotnet publish "JobRadar.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
