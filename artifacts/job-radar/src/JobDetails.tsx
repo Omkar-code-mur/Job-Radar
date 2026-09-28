@@ -4,8 +4,9 @@ type Job = { id:string; company:string; title:string; location:string; workplace
 type AiAnalysis = { verdict:'STRONG_FIT'|'POSSIBLE_FIT'|'WEAK_FIT'; fitScore:number; summary:string; strengths:string[]; gaps:string[]; concerns:string[]; interviewFocus:string[]; nextAction:string };
 
 const SESSION_KEY='jobradar.supabase.session';
+const API_BASE=((import.meta.env.VITE_API_URL as string|undefined)?.trim()||'https://job-radar-nfgv.onrender.com').replace(/\/+$/,'');
 function token(){try{return (JSON.parse(sessionStorage.getItem(SESSION_KEY)||'{}') as {access_token?:string}).access_token||''}catch{return ''}}
-async function api<T>(path:string,init:RequestInit={}):Promise<T>{const headers=new Headers(init.headers);headers.set('Authorization',`Bearer ${token()}`);headers.set('Content-Type','application/json');const r=await fetch(`/api${path}`,{...init,headers});if(!r.ok)throw new Error(await r.text()||`Request failed (${r.status})`);return r.status===204?undefined as T:await r.json()}
+async function api<T>(path:string,init:RequestInit={}):Promise<T>{const headers=new Headers(init.headers);headers.set('Authorization',`Bearer ${token()}`);headers.set('Content-Type','application/json');const r=await fetch(`${API_BASE}/api${path}`,{...init,headers});if(!r.ok)throw new Error(await r.text()||`Request failed (${r.status})`);return r.status===204?undefined as T:await r.json()}
 function Card({children,className='' }:{children:React.ReactNode;className?:string}){return <div className={`rounded-xl border bg-card p-5 shadow-sm ${className}`}>{children}</div>}
 function Button({children,onClick,primary=false,disabled=false}:{children:React.ReactNode;onClick?:()=>void;primary?:boolean;disabled?:boolean}){return <button disabled={disabled} onClick={onClick} className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${primary?'bg-primary text-primary-foreground hover:opacity-90':'border bg-background hover:bg-muted'} disabled:opacity-50`}>{children}</button>}
 
