@@ -7,7 +7,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 
 import './index.css';
 
-const apiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+const apiUrl = ((import.meta.env.VITE_API_URL as string | undefined)?.trim() || 'https://job-radar-nfgv.onrender.com');
 if (apiUrl) {
   setBaseUrl(apiUrl);
 }
