@@ -130,11 +130,16 @@ button, a { -webkit-tap-highlight-color: transparent; }
 
 /* Mobile ergonomics: keep the signal desk comfortable on narrow phones. */
 @media (max-width: 640px) {
-  html, body, #root { max-width: 100%; overflow-x: hidden; }
+  html, body, #root { width: 100%; max-width: 100%; overflow-x: hidden; }
   .shell-grid { background-size: 22px 22px; }
   .btn { min-height: 44px; }
   .field { min-height: 44px; }
+  button:not(.btn), a[role="button"] { min-height: 44px; }
+  header { min-width: 0; }
   header .btn { padding-inline: .75rem; }
+  main { min-width: 0; }
+  .prose { max-width: 100%; overflow-wrap: anywhere; }
+  table { display: block; max-width: 100%; overflow-x: auto; }
   .card { border-radius: .75rem; }
 }
 
