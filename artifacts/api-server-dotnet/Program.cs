@@ -1,4 +1,5 @@
 using JobRadar.Api.Auth;
+using JobRadar.Api.Database;
 using JobRadar.Api.Sources;
 using JobRadar.Api.Sources.Greenhouse;
 using JobRadar.Api.Sources.Deloitte;
@@ -26,7 +27,8 @@ builder.Services.AddScoped<JobSourceFetcherFactory>();
 builder.Services.AddScoped<AiJobIntelligenceService>();
 builder.Services.AddScoped<OpenRouterAiJobIntelligenceProvider>();
 builder.Services.AddScoped<AiJobIntelligenceProviderFactory>();
-var connectionString = builder.Configuration["ConnectionStrings:DefaultConnection"] ?? builder.Configuration["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
+var rawConnectionString = builder.Configuration["ConnectionStrings:DefaultConnection"] ?? builder.Configuration["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
+var connectionString = string.IsNullOrWhiteSpace(rawConnectionString) ? rawConnectionString : DatabaseConnectionString.Normalize(rawConnectionString);
 if (string.IsNullOrWhiteSpace(connectionString)) throw new InvalidOperationException("DATABASE_URL must be configured.");
 var baseStore = new PostgresJobRadarStore(connectionString);
 var store = new UserScopedJobRadarStore(baseStore, connectionString);
