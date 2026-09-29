@@ -361,6 +361,10 @@ function SourceModal({
                   );
                 }
 
+                if (next === 'TRAKSTAR_HIRE') {
+                  setUrl('https://hashedin.hire.trakstar.com/');
+                }
+
                 if (next !== 'GREENHOUSE_API') {
                   setBoardToken('');
                 }
@@ -373,6 +377,10 @@ function SourceModal({
 
               <option value="DELOITTE_USI">
                 Deloitte USI careers
+              </option>
+
+              <option value="TRAKSTAR_HIRE">
+                Trakstar Hire
               </option>
 
               <option value="LEVER_API">
