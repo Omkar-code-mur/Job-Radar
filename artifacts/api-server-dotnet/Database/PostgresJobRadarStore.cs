@@ -215,8 +215,9 @@ public sealed class PostgresJobRadarStore
             if (!requested.Enabled) throw new ScanRequestException(StatusCodes.Status400BadRequest, "Source is disabled.");
             if (string.Equals(requested.Type, "GREENHOUSE_API", StringComparison.OrdinalIgnoreCase)
                 && (string.IsNullOrWhiteSpace(requested.BoardToken) || !Uri.TryCreate(requested.Url, UriKind.Absolute, out var boardUri)
-                    || !boardUri.Host.Equals("boards.greenhouse.io", StringComparison.OrdinalIgnoreCase)))
-                throw new ScanRequestException(StatusCodes.Status400BadRequest, "Greenhouse source requires a public boards.greenhouse.io URL and boardToken.");
+                    || !(boardUri.Host.Equals("boards.greenhouse.io", StringComparison.OrdinalIgnoreCase)
+                        || boardUri.Host.Equals("job-boards.greenhouse.io", StringComparison.OrdinalIgnoreCase))))
+                throw new ScanRequestException(StatusCodes.Status400BadRequest, "Greenhouse source requires a public Greenhouse job board URL and boardToken.");
             try { sourceFetcherFactory.Get(requested.Type); }
             catch (NotSupportedException exception) { throw new ScanRequestException(StatusCodes.Status400BadRequest, exception.Message); }
         }
