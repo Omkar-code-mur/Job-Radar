@@ -1,5 +1,6 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useMemo, useState, FormEvent, ReactNode, useEffect } from 'react';
 import { setAuthTokenGetter } from '@workspace/api-client-react';
+import PublicHome from '../PublicHome';
 
 const SESSION_KEY = 'jobradar.supabase.session';
 
@@ -12,6 +13,20 @@ type AuthSession = {
 };
 
 type AuthGateProps = { children: ReactNode };
+
+type AuthContextValue = {
+  isAuthenticated: boolean;
+  requireLogin: () => void;
+};
+
+const AuthContext = createContext<AuthContextValue>({
+  isAuthenticated: false,
+  requireLogin: () => undefined,
+});
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
 
 function getSupabaseConfig() {
   const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -86,6 +101,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [loginOpen, setLoginOpen] = useState(false);
 
   const tokenGetter = useMemo(() => async () => loadSession()?.access_token ?? null, []);
 
@@ -146,6 +162,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
       saveSession(result);
       setSession(result);
+      setLoginOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed.');
     } finally {
@@ -163,9 +180,25 @@ export default function AuthGate({ children }: AuthGateProps) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">Checking session…</div>;
   }
 
+  const authValue = useMemo<AuthContextValue>(() => ({
+    isAuthenticated: Boolean(session),
+    requireLogin: () => {
+      if (!session) {
+        setMode('sign-in');
+        setError('');
+        setMessage('');
+        setLoginOpen(true);
+      }
+    },
+  }), [session]);
+
+  if (checking) {
+    return <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">Checking session…</div>;
+  }
+
   if (session) {
     return (
-      <>
+      <AuthContext.Provider value={authValue}>
         {children}
         <button
           type="button"
@@ -174,69 +207,47 @@ export default function AuthGate({ children }: AuthGateProps) {
         >
           Sign out
         </button>
-      </>
+      </AuthContext.Provider>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md rounded-2xl border bg-card p-8 shadow-sm">
-        <div className="mb-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Job Radar</p>
-          <h1 className="mt-2 text-2xl font-semibold">{mode === 'sign-in' ? 'Welcome back' : 'Create your account'}</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Sign in to access your private job-search workspace.</p>
+    <AuthContext.Provider value={authValue}>
+      <PublicHome onRequireLogin={authValue.requireLogin} />
+      {loginOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md rounded-2xl border bg-card p-6 shadow-2xl">
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Job Radar</p>
+                <h2 className="mt-2 text-2xl font-bold">{mode === 'sign-in' ? 'Sign in to continue' : 'Create your account'}</h2>
+                <p className="mt-2 text-sm text-muted-foreground">Your account is only needed for private features like saving jobs, tracking applications and personalized matching.</p>
+              </div>
+              <button type="button" onClick={() => setLoginOpen(false)} className="rounded-lg px-2 py-1 text-xl text-muted-foreground hover:bg-muted" aria-label="Close sign in dialog">×</button>
+            </div>
+
+            <form onSubmit={submit} className="space-y-4">
+              <label className="block text-sm font-medium">
+                Email
+                <input type="email" required autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} className="mt-1.5 w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring" />
+              </label>
+              <label className="block text-sm font-medium">
+                Password
+                <input type="password" required minLength={6} autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'} value={password} onChange={event => setPassword(event.target.value)} className="mt-1.5 w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring" />
+              </label>
+              {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+              {message && <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">{message}</p>}
+              <button type="submit" disabled={busy} className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+                {busy ? 'Please wait…' : mode === 'sign-in' ? 'Sign in' : 'Create account'}
+              </button>
+            </form>
+
+            <button type="button" onClick={() => { setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in'); setError(''); setMessage(''); }} className="mt-5 w-full text-sm text-muted-foreground hover:text-foreground">
+              {mode === 'sign-in' ? 'Need an account? Create one' : 'Already have an account? Sign in'}
+            </button>
+          </div>
         </div>
-
-        <form onSubmit={submit} className="space-y-4">
-          <label className="block text-sm font-medium">
-            Email
-            <input
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="mt-1.5 w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring"
-            />
-          </label>
-
-          <label className="block text-sm font-medium">
-            Password
-            <input
-              type="password"
-              required
-              minLength={6}
-              autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="mt-1.5 w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring"
-            />
-          </label>
-
-          {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
-          {message && <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">{message}</p>}
-
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-          >
-            {busy ? 'Please wait…' : mode === 'sign-in' ? 'Sign in' : 'Create account'}
-          </button>
-        </form>
-
-        <button
-          type="button"
-          onClick={() => {
-            setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in');
-            setError('');
-            setMessage('');
-          }}
-          className="mt-5 w-full text-sm text-muted-foreground hover:text-foreground"
-        >
-          {mode === 'sign-in' ? 'Need an account? Create one' : 'Already have an account? Sign in'}
-        </button>
-      </div>
-    </div>
+      )}
+    </AuthContext.Provider>
   );
 }
