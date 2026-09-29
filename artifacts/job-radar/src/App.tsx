@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Link, Route, Switch, Router as WouterRouter, useLocation, useParams } from 'wouter';
 import {
@@ -80,7 +81,8 @@ function PageTitle({ eyebrow, title, detail, action }: { eyebrow: string; title:
   return <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mono mb-2 text-[10px] font-bold uppercase tracking-[.2em] text-muted-foreground">{eyebrow}</div><h1 className="text-3xl font-bold tracking-tight">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{detail}</p></div>{action}</div>;
 }
 function Modal({ title, children, close }: { title: string; children: React.ReactNode; close: () => void }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-primary/35 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true"><div className="card max-h-[90dvh] w-full max-w-lg overflow-auto p-5 shadow-xl rise"><div className="mb-5 flex items-center justify-between"><h2 className="text-lg font-bold">{title}</h2><button className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" onClick={close} data-testid="button-close-modal"><X size={18} /></button></div>{children}</div></div>;
+  const modal = <div className="fixed inset-0 z-[100] flex items-center justify-center bg-primary/35 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true"><div className="card max-h-[90dvh] w-full max-w-lg overflow-auto p-5 shadow-xl rise"><div className="mb-5 flex items-center justify-between"><h2 className="text-lg font-bold">{title}</h2><button className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" onClick={close} data-testid="button-close-modal"><X size={18} /></button></div>{children}</div></div>;
+  return createPortal(modal, document.body);
 }
 function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
