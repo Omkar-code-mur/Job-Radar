@@ -161,7 +161,8 @@ api.MapPut("/workspace/settings", async (HttpContext context, WorkspaceSettings 
 api.MapPost("/scheduler/scan", async (HttpContext context, JobSourceFetcherFactory sourceFetcherFactory, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, superAdminEmail, ct); if (!IsAdminRole(user?.Role)) return Results.Forbid(); return Results.Ok(await store.ScanAsync(user.Id, (await store.GetSourcesAsync(ct)).Select(source => source.Id).ToArray(), sourceFetcherFactory, ct)); });
 app.Run();
 
-public record AdminAccessInput(bool Enabled);\npublic record Company(string Id, string Name, string Domain, string Initials, string Color, bool Enabled, int SourceCount, int JobCount, string CreatedAt);
+public record AdminAccessInput(bool Enabled);
+public record Company(string Id, string Name, string Domain, string Initials, string Color, bool Enabled, int SourceCount, int JobCount, string CreatedAt);
 public record CompanyInput(string Name, string Domain);
 public record CompanyUpdate(string? Name, string? Domain, bool? Enabled);
 public record JobSource(string Id, string CompanyId, string CompanyName, string Name, string Type, string Url, bool Enabled, string Status, string LastFetch, int JobsFetched, int FailureCount, string? LastError, string? BoardToken, string LastSuccess = "Never", int FetchDurationMs = 0, int MalformedRecordCount = 0, string[]? Diagnostics = null);
