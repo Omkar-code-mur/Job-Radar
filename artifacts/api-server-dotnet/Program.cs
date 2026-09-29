@@ -6,6 +6,8 @@ using JobRadar.Api.Sources.Greenhouse;
 using JobRadar.Api.Sources.Deloitte;
 using JobRadar.Api.Sources.Trakstar;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 using System.Diagnostics;
 using System.Text.Json;
 
@@ -21,6 +23,19 @@ if (string.IsNullOrWhiteSpace(supabaseUrl)) throw new InvalidOperationException(
 if (string.IsNullOrWhiteSpace(supabaseKey)) throw new InvalidOperationException("SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY must be configured.");
 builder.Services.AddAuthentication("Supabase").AddScheme<AuthenticationSchemeOptions, SupabaseAuthenticationHandler>("Supabase", _ => { });
 builder.Services.AddAuthorization();
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("public-jobs", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 60,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }));
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+});
 builder.Services.AddHttpClient("SupabaseAuth", client => client.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddHttpClient<GreenhouseJobSource>(client => { client.Timeout = TimeSpan.FromSeconds(10); client.DefaultRequestHeaders.UserAgent.ParseAdd("JobRadar/1.0 public-job-monitor"); });
 builder.Services.AddHttpClient<DeloitteUsiJobSource>(client => { client.Timeout = TimeSpan.FromSeconds(20); client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; JobRadar/1.0; public-job-monitor)"); });
@@ -50,6 +65,7 @@ var app = builder.Build();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.Use(async (context, next) =>
 {
     var requestId = context.Request.Headers["X-Request-ID"].FirstOrDefault() ?? context.TraceIdentifier;
@@ -64,6 +80,12 @@ app.Use(async (context, next) =>
     }
 });
 app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
+var publicApi = app.MapGroup("/api/public");
+publicApi.MapGet("/jobs", async (HttpContext context, int? limit, string? search, CancellationToken ct) =>
+{
+    var requestedLimit = Math.Clamp(limit ?? 24, 1, 50);
+    return Results.Ok(await baseStore.GetPublicJobsAsync(requestedLimit, search, ct));
+}).RequireRateLimiting("public-jobs");
 var api = app.MapGroup("/api").RequireAuthorization();
 var monitorableSourceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "GREENHOUSE_API", "DELOITTE_USI", "TRAKSTAR_HIRE" };
 bool IsMonitorableSource(JobSource source) => source.Enabled && source.Status == "healthy" && monitorableSourceTypes.Contains(source.Type);
@@ -191,6 +213,7 @@ public record AdminAccessInput(bool Enabled);
 public record Company(string Id, string Name, string Domain, string Initials, string Color, bool Enabled, int SourceCount, int JobCount, string CreatedAt);
 public record CompanyInput(string Name, string Domain);
 public record CompanyUpdate(string? Name, string? Domain, bool? Enabled);
+public record PublicJob(string Id, string Company, string Title, string Location, string WorkplaceType, string PostedDate, string FirstSeenAt, string ApplicationUrl);
 public record JobSource(string Id, string CompanyId, string CompanyName, string Name, string Type, string Url, bool Enabled, string Status, string LastFetch, int JobsFetched, int FailureCount, string? LastError, string? BoardToken, string LastSuccess = "Never", int FetchDurationMs = 0, int MalformedRecordCount = 0, string[]? Diagnostics = null);
 public record SourceInput(string CompanyId, string Name, string Type, string Url, string? BoardToken = null);
 public record SourceUpdate(string? Name, string? Url, bool? Enabled, string? BoardToken);
