@@ -1,3 +1,4 @@
+using JobRadar.Api;
 using JobRadar.Api.Auth;
 using JobRadar.Api.Database;
 using JobRadar.Api.Sources;
@@ -36,10 +37,12 @@ var store = new UserScopedJobRadarStore(baseStore, connectionString);
 var workspaceStore = new UserWorkspaceStore(connectionString);
 var userIdentityStore = new UserIdentityStore(connectionString);
 var profileImportService = new ProfileImportService(connectionString);
+var feedbackStore = new FeedbackStore(connectionString);
 await userIdentityStore.InitializeAsync();
 await store.InitializeAsync();
 await workspaceStore.InitializeAsync();
 await profileImportService.InitializeAsync();
+await feedbackStore.InitializeAsync();
 var app = builder.Build();
 app.UseCors();
 app.UseAuthentication();
@@ -79,6 +82,26 @@ api.MapPatch("/users/{id}/admin-access", async (HttpContext context, Guid id, Ad
     return updated is null
         ? Results.NotFound(new { error = "User not found or protected." })
         : Results.Ok(updated);
+});
+api.MapGet("/feedback", async (HttpContext context, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, superAdminEmail, ct);
+    if (user is null) return Results.Unauthorized();
+    var all = IsAdminRole(user.Role);
+    return Results.Ok(await feedbackStore.GetAsync(user.Id, all, ct));
+});
+api.MapPost("/feedback", async (HttpContext context, FeedbackInput input, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, superAdminEmail, ct);
+    if (user is null) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await feedbackStore.AddAsync(user.Id, user.Email, user.Role, input, ct));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
 });
 api.MapGet("/dashboard", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, superAdminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(await store.DashboardAsync(user.Id, ct)); });
 api.MapGet("/companies", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, superAdminEmail, ct); if (user is null) return Results.Unauthorized(); var companies = await store.GetCompaniesAsync(ct); if (IsAdminRole(user.Role)) return Results.Ok(companies); var sources = await store.GetSourcesAsync(ct); var ids = sources.Where(IsMonitorableSource).Select(s => s.CompanyId).ToHashSet(StringComparer.Ordinal); return Results.Ok(companies.Where(c => ids.Contains(c.Id))); });
