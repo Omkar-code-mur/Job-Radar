@@ -146,7 +146,7 @@ public sealed class PostgresJobRadarStore
         var boardToken = input.BoardToken ?? (input.Url is null ? source.BoardToken : ExtractBoardToken(updatedUrl));
         if (string.Equals(source.Type, "GREENHOUSE_API", StringComparison.OrdinalIgnoreCase)
             && (string.IsNullOrWhiteSpace(boardToken) || !Uri.TryCreate(updatedUrl, UriKind.Absolute, out var boardUri)
-                || !boardUri.Host.Equals("boards.greenhouse.io", StringComparison.OrdinalIgnoreCase)))
+                || !(boardUri.Host.Equals("boards.greenhouse.io", StringComparison.OrdinalIgnoreCase) || boardUri.Host.Equals("job-boards.greenhouse.io", StringComparison.OrdinalIgnoreCase))))
             throw new SourceConfigurationException("Greenhouse source requires a public boards.greenhouse.io URL and boardToken.");
         var updated = source with { Name = input.Name ?? source.Name, Url = updatedUrl, Enabled = input.Enabled ?? source.Enabled, BoardToken = boardToken };
         await using var connection = await OpenAsync(cancellationToken); await using var command = new NpgsqlCommand("update sources set name=@name,url=@url,enabled=@enabled,board_token=@token where id=@id", connection); Add(command, "id", id); Add(command, "name", updated.Name); Add(command, "url", updated.Url); Add(command, "enabled", updated.Enabled); Add(command, "token", (object?)updated.BoardToken ?? DBNull.Value); await command.ExecuteNonQueryAsync(cancellationToken); return updated;
@@ -245,5 +245,5 @@ public sealed class PostgresJobRadarStore
     private static void AddJson<T>(NpgsqlCommand command,string name,T value)=>command.Parameters.AddWithValue(name,NpgsqlTypes.NpgsqlDbType.Jsonb,JsonSerializer.Serialize(value));
     private T Json<T>(string value)=>JsonSerializer.Deserialize<T>(value,jsonOptions)!;
     private static string Initials(string name) { var parts=name.Split(' ',StringSplitOptions.RemoveEmptyEntries); if(parts.Length==0) return "?"; var initials=string.Concat(parts.Select(part=>part[0])).ToUpperInvariant(); return initials.Length>2?initials[..2]:initials; }
-    private static string? ExtractBoardToken(string url) { if(!Uri.TryCreate(url,UriKind.Absolute,out var uri)||!uri.Host.Equals("boards.greenhouse.io",StringComparison.OrdinalIgnoreCase)) return null; var token=uri.AbsolutePath.Trim('/').Split('/')[0]; return string.IsNullOrWhiteSpace(token)?null:token; }
+    private static string? ExtractBoardToken(string url) { if(!Uri.TryCreate(url,UriKind.Absolute,out var uri)||!(uri.Host.Equals("boards.greenhouse.io",StringComparison.OrdinalIgnoreCase)||uri.Host.Equals("job-boards.greenhouse.io",StringComparison.OrdinalIgnoreCase))) return null; var token=uri.AbsolutePath.Trim('/').Split('/')[0]; return string.IsNullOrWhiteSpace(token)?null:token; }
 }
