@@ -14,6 +14,7 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.Al
 var supabaseUrl = builder.Configuration["SUPABASE_URL"] ?? Environment.GetEnvironmentVariable("SUPABASE_URL");
 var supabaseKey = builder.Configuration["SUPABASE_ANON_KEY"] ?? builder.Configuration["SUPABASE_PUBLISHABLE_KEY"] ?? Environment.GetEnvironmentVariable("SUPABASE_ANON_KEY") ?? Environment.GetEnvironmentVariable("SUPABASE_PUBLISHABLE_KEY");
 var adminEmail = builder.Configuration["JOBRADAR_ADMIN_EMAIL"] ?? Environment.GetEnvironmentVariable("JOBRADAR_ADMIN_EMAIL");
+var superAdminEmail = builder.Configuration["JOBRADAR_SUPER_ADMIN_EMAIL"] ?? Environment.GetEnvironmentVariable("JOBRADAR_SUPER_ADMIN_EMAIL");
 if (string.IsNullOrWhiteSpace(supabaseUrl)) throw new InvalidOperationException("SUPABASE_URL must be configured.");
 if (string.IsNullOrWhiteSpace(supabaseKey)) throw new InvalidOperationException("SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY must be configured.");
 builder.Services.AddAuthentication("Supabase").AddScheme<AuthenticationSchemeOptions, SupabaseAuthenticationHandler>("Supabase", _ => { });
@@ -60,10 +61,28 @@ app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 var api = app.MapGroup("/api").RequireAuthorization();
 var monitorableSourceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "GREENHOUSE_API", "DELOITTE_USI" };
 bool IsMonitorableSource(JobSource source) => source.Enabled && source.Status == "healthy" && monitorableSourceTypes.Contains(source.Type);
-api.MapGet("/auth/me", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(user); });
+bool IsAdminRole(string? role) => role is "ADMIN" or "SUPER_ADMIN";
+api.MapGet("/auth/me", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, superAdminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(user); });
+api.MapGet("/users", async (HttpContext context, CancellationToken ct) =>
+{
+    var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, superAdminEmail, ct);
+    if (user?.Role != "SUPER_ADMIN") return Results.Forbid();
+    return Results.Ok(await userIdentityStore.GetUsersAsync(ct));
+});
+api.MapPatch("/users/{id}/admin-access", async (HttpContext context, Guid id, AdminAccessInput input, CancellationToken ct) =>
+{
+    var actor = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, superAdminEmail, ct);
+    if (actor?.Role != "SUPER_ADMIN") return Results.Forbid();
+    if (id == actor.Id) return Results.BadRequest(new { error = "You cannot change your own admin access." });
+
+    var updated = await userIdentityStore.UpdateAdminAccessAsync(id, input.Enabled, actor.Id, ct);
+    return updated is null
+        ? Results.NotFound(new { error = "User not found or protected." })
+        : Results.Ok(updated);
+});
 api.MapGet("/dashboard", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(await store.DashboardAsync(user.Id, ct)); });
-api.MapGet("/companies", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user is null) return Results.Unauthorized(); var companies = await store.GetCompaniesAsync(ct); if (user.Role == "ADMIN") return Results.Ok(companies); var sources = await store.GetSourcesAsync(ct); var ids = sources.Where(IsMonitorableSource).Select(s => s.CompanyId).ToHashSet(StringComparer.Ordinal); return Results.Ok(companies.Where(c => ids.Contains(c.Id))); });
-api.MapPost("/companies", async (HttpContext context, CompanyInput input, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user?.Role != "ADMIN") return Results.Forbid(); if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Domain)) return Results.BadRequest(new { error = "Company name and domain are required." }); var company = await store.AddCompanyAsync(input, ct); return Results.Created($"/api/companies/{company.Id}", company); });
+api.MapGet("/companies", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user is null) return Results.Unauthorized(); var companies = await store.GetCompaniesAsync(ct); if (IsAdminRole(user.Role)) return Results.Ok(companies); var sources = await store.GetSourcesAsync(ct); var ids = sources.Where(IsMonitorableSource).Select(s => s.CompanyId).ToHashSet(StringComparer.Ordinal); return Results.Ok(companies.Where(c => ids.Contains(c.Id))); });
+api.MapPost("/companies", async (HttpContext context, CompanyInput input, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (!IsAdminRole(user?.Role)) return Results.Forbid(); if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Domain)) return Results.BadRequest(new { error = "Company name and domain are required." }); var company = await store.AddCompanyAsync(input, ct); return Results.Created($"/api/companies/{company.Id}", company); });
 api.MapPatch("/companies/{id}", async (HttpContext context, string id, CompanyUpdate input, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user?.Role != "ADMIN") return Results.Forbid(); var company = await store.UpdateCompanyAsync(id, input, ct); return company is null ? Results.NotFound(new { error = "Company not found." }) : Results.Ok(company); });
 api.MapDelete("/companies/{id}", async (HttpContext context, string id, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user?.Role != "ADMIN") return Results.Forbid(); return await store.DeleteCompanyAsync(id, ct) ? Results.NoContent() : Results.NotFound(new { error = "Company not found." }); });
 api.MapGet("/sources", async (CancellationToken ct) => Results.Ok(await store.GetSourcesAsync(ct)));
@@ -142,7 +161,7 @@ api.MapPut("/workspace/settings", async (HttpContext context, WorkspaceSettings 
 api.MapPost("/scheduler/scan", async (HttpContext context, JobSourceFetcherFactory sourceFetcherFactory, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, ct); if (user?.Role != "ADMIN") return Results.Forbid(); return Results.Ok(await store.ScanAsync(user.Id, (await store.GetSourcesAsync(ct)).Select(source => source.Id).ToArray(), sourceFetcherFactory, ct)); });
 app.Run();
 
-public record Company(string Id, string Name, string Domain, string Initials, string Color, bool Enabled, int SourceCount, int JobCount, string CreatedAt);
+public record AdminAccessInput(bool Enabled);\npublic record Company(string Id, string Name, string Domain, string Initials, string Color, bool Enabled, int SourceCount, int JobCount, string CreatedAt);
 public record CompanyInput(string Name, string Domain);
 public record CompanyUpdate(string? Name, string? Domain, bool? Enabled);
 public record JobSource(string Id, string CompanyId, string CompanyName, string Name, string Type, string Url, bool Enabled, string Status, string LastFetch, int JobsFetched, int FailureCount, string? LastError, string? BoardToken, string LastSuccess = "Never", int FetchDurationMs = 0, int MalformedRecordCount = 0, string[]? Diagnostics = null);
