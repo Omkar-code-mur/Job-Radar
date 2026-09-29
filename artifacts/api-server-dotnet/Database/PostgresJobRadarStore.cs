@@ -154,6 +154,35 @@ public sealed class PostgresJobRadarStore
 
     public async Task<bool> DeleteSourceAsync(string id, CancellationToken cancellationToken = default) => await ExecuteBoolAsync("delete from sources where id=@id", id, cancellationToken);
 
+    public async Task<IReadOnlyList<PublicJob>> GetPublicJobsAsync(int limit = 24, string? search = null, CancellationToken cancellationToken = default)
+    {
+        limit = Math.Clamp(limit, 1, 50);
+        var sql = """
+            select j.id, j.company, j.title, j.location, j.workplace_type, j.posted_date,
+                   j.first_seen_at, j.application_url
+            from jobs j
+            inner join sources s on s.id = j.source_id
+            where s.enabled = true and s.status = 'healthy'
+        """;
+        if (!string.IsNullOrWhiteSpace(search))
+            sql += " and (j.title ilike @search or j.company ilike @search or j.location ilike @search)";
+        sql += " order by j.first_seen_at desc, j.posted_date desc limit @limit";
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        Add(command, "limit", limit);
+        if (!string.IsNullOrWhiteSpace(search)) Add(command, "search", $"%{search.Trim()}%");
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var result = new List<PublicJob>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new PublicJob(
+                reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7)));
+        }
+        return result;
+    }
+
     public async Task<IReadOnlyList<Job>> GetJobsAsync(string? search, string? status, string? location, string? workplaceType, CancellationToken cancellationToken = default)
     {
         var sql = "select id,company_id,source_id,external_job_id,company,title,description,location,workplace_type,department,employment_type,posted_date,first_seen_at,last_seen_at,application_url,source_url,score,is_match,notified,matched_skills,missing_skills,breakdown from jobs where 1=1"; if (!string.IsNullOrWhiteSpace(search)) sql += " and (title ilike @search or company ilike @search or description ilike @search)"; if (!string.IsNullOrWhiteSpace(location)) sql += " and location ilike @location"; if (!string.IsNullOrWhiteSpace(workplaceType)) sql += " and workplace_type=@workplace"; if (status == "matched") sql += " and is_match=true"; if (status == "notified") sql += " and notified=true"; if (status == "new") sql += " and first_seen_at::timestamptz > now() - interval '1 day'"; sql += " order by first_seen_at desc, posted_date desc";
