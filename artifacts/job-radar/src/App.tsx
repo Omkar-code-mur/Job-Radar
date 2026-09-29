@@ -194,9 +194,11 @@ function SourceModal({
   const qc = useQueryClient();
   const create = useCreateSource();
   const update = useUpdateSource();
+  const [submitError, setSubmitError] = useState('');
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError('');
 
     const done = () => {
       qc.invalidateQueries({
@@ -222,6 +224,9 @@ function SourceModal({
         },
         {
           onSuccess: done,
+          onError: (error: any) => {
+            setSubmitError(error?.message || 'Could not save this source. Please check the fields and try again.');
+          },
         }
       );
     } else {
@@ -239,6 +244,9 @@ function SourceModal({
         },
         {
           onSuccess: done,
+          onError: (error: any) => {
+            setSubmitError(error?.message || 'Could not add this source. Please check the fields and try again.');
+          },
         }
       );
     }
@@ -435,6 +443,12 @@ function SourceModal({
           </p>
         )}
 
+        {submitError && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">
+            {submitError}
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
           <button
             type="button"
@@ -446,6 +460,7 @@ function SourceModal({
           </button>
 
           <button
+            type="submit"
             className="btn btn-primary"
             disabled={create.isPending || update.isPending}
             data-testid="button-save-source"
