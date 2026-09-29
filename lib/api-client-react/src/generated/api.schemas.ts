@@ -72,6 +72,7 @@ export const JobSourceType = {
   LEVER_API: 'LEVER_API',
   STRUCTURED_HTML: 'STRUCTURED_HTML',
   GENERIC_HTML: 'GENERIC_HTML',
+  TRAKSTAR_HIRE: 'TRAKSTAR_HIRE',
 } as const;
 
 export type JobSourceStatus = typeof JobSourceStatus[keyof typeof JobSourceStatus];
@@ -144,6 +145,7 @@ export const SourceInputType = {
   LEVER_API: 'LEVER_API',
   STRUCTURED_HTML: 'STRUCTURED_HTML',
   GENERIC_HTML: 'GENERIC_HTML',
+  TRAKSTAR_HIRE: 'TRAKSTAR_HIRE',
 } as const;
 
 export interface SourceInput {
