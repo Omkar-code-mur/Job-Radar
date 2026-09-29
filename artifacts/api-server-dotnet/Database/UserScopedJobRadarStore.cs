@@ -77,7 +77,8 @@ public sealed class UserScopedJobRadarStore
                 "new" => DateTimeOffset.TryParse(job.FirstSeenAt, out var date) && date > DateTimeOffset.UtcNow.AddDays(-1),
                 _ => true
             })
-            .OrderByDescending(job => job.PostedDate)
+            .OrderByDescending(job => job.FirstSeenAt)
+            .ThenByDescending(job => job.PostedDate)
             .ToArray();
     }
 
