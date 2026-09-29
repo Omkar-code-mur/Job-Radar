@@ -133,7 +133,7 @@ public sealed class PostgresJobRadarStore
         var token = input.BoardToken ?? ExtractBoardToken(input.Url);
         if (string.Equals(input.Type, "GREENHOUSE_API", StringComparison.OrdinalIgnoreCase)
             && (string.IsNullOrWhiteSpace(token) || !Uri.TryCreate(input.Url, UriKind.Absolute, out var boardUri)
-                || !boardUri.Host.Equals("boards.greenhouse.io", StringComparison.OrdinalIgnoreCase)))
+                || !(boardUri.Host.Equals("boards.greenhouse.io", StringComparison.OrdinalIgnoreCase) || boardUri.Host.Equals("job-boards.greenhouse.io", StringComparison.OrdinalIgnoreCase))))
             return null;
         var source = new JobSource($"source-{Guid.NewGuid():N}"[..15], company.Id, company.Name, input.Name.Trim(), input.Type, input.Url.Trim(), true, "never_run", "Never", 0, 0, null, token, "Never", 0, 0, []);
         await using var connection = await OpenAsync(cancellationToken); await using var command = new NpgsqlCommand("insert into sources (id,company_id,name,type,url,board_token) values (@id,@company,@name,@type,@url,@token)", connection); Add(command, "id", source.Id); Add(command, "company", source.CompanyId); Add(command, "name", source.Name); Add(command, "type", source.Type); Add(command, "url", source.Url); Add(command, "token", (object?)source.BoardToken ?? DBNull.Value); await command.ExecuteNonQueryAsync(cancellationToken); return source;
