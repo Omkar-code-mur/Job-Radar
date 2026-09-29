@@ -14,7 +14,7 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.Al
 var supabaseUrl = builder.Configuration["SUPABASE_URL"] ?? Environment.GetEnvironmentVariable("SUPABASE_URL");
 var supabaseKey = builder.Configuration["SUPABASE_ANON_KEY"] ?? builder.Configuration["SUPABASE_PUBLISHABLE_KEY"] ?? Environment.GetEnvironmentVariable("SUPABASE_ANON_KEY") ?? Environment.GetEnvironmentVariable("SUPABASE_PUBLISHABLE_KEY");
 var adminEmail = builder.Configuration["JOBRADAR_ADMIN_EMAIL"] ?? Environment.GetEnvironmentVariable("JOBRADAR_ADMIN_EMAIL");
-var superAdminEmail = builder.Configuration["JOBRADAR_SUPER_ADMIN_EMAIL"] ?? Environment.GetEnvironmentVariable("JOBRADAR_SUPER_ADMIN_EMAIL");
+var superAdminEmail = builder.Configuration["JOBRADAR_SUPER_ADMIN_EMAIL"] ?? Environment.GetEnvironmentVariable("JOBRADAR_SUPER_ADMIN_EMAIL") ?? adminEmail;
 if (string.IsNullOrWhiteSpace(supabaseUrl)) throw new InvalidOperationException("SUPABASE_URL must be configured.");
 if (string.IsNullOrWhiteSpace(supabaseKey)) throw new InvalidOperationException("SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY must be configured.");
 builder.Services.AddAuthentication("Supabase").AddScheme<AuthenticationSchemeOptions, SupabaseAuthenticationHandler>("Supabase", _ => { });
