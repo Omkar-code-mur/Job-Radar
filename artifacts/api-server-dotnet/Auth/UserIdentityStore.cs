@@ -10,6 +10,14 @@ public sealed record CurrentUser(
     string Role,
     DateTimeOffset CreatedAt);
 
+public sealed record ManagedUser(
+    Guid Id,
+    string Email,
+    string? DisplayName,
+    string Role,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
 public sealed class UserIdentityStore
 {
     private readonly string _connectionString;
@@ -29,10 +37,16 @@ public sealed class UserIdentityStore
                 id uuid primary key,
                 email text not null unique,
                 display_name text null,
-                role text not null default 'USER' check (role in ('USER', 'ADMIN')),
+                role text not null default 'USER',
                 created_at timestamptz not null default now(),
                 updated_at timestamptz not null default now()
             );
+
+            alter table users drop constraint if exists users_role_check;
+
+            alter table users
+                add constraint users_role_check
+                check (role in ('USER', 'ADMIN', 'SUPER_ADMIN'));
             """;
 
         await using var command = new NpgsqlCommand(sql, connection);
@@ -42,11 +56,9 @@ public sealed class UserIdentityStore
     public async Task<CurrentUser?> GetOrCreateAsync(
         ClaimsPrincipal principal,
         string? adminEmail,
+        string? superAdminEmail,
         CancellationToken cancellationToken = default)
     {
-        // Accept both the Supabase JWT-style claims and the standard .NET claim types.
-        // This keeps the identity lookup resilient to claim-type mapping performed by
-        // authentication handlers or middleware.
         var subject = principal.FindFirst("sub")?.Value
             ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var email = principal.FindFirst("email")?.Value
@@ -60,11 +72,20 @@ public sealed class UserIdentityStore
 
         const string upsertSql = """
             insert into users (id, email, role)
-            values (@id, @email, case when @admin_email is not null and lower(@email) = lower(@admin_email) then 'ADMIN' else 'USER' end)
+            values (
+                @id,
+                @email,
+                case
+                    when @super_admin_email is not null and lower(@email) = lower(@super_admin_email) then 'SUPER_ADMIN'
+                    when @admin_email is not null and lower(@email) = lower(@admin_email) then 'ADMIN'
+                    else 'USER'
+                end
+            )
             on conflict (id) do update set
                 email = excluded.email,
                 role = case
-                    when @admin_email is not null and lower(excluded.email) = lower(@admin_email) then 'ADMIN'
+                    when @super_admin_email is not null and lower(excluded.email) = lower(@super_admin_email) then 'SUPER_ADMIN'
+                    when @admin_email is not null and lower(excluded.email) = lower(@admin_email) and users.role = 'USER' then 'ADMIN'
                     else users.role
                 end,
                 updated_at = now();
@@ -75,9 +96,85 @@ public sealed class UserIdentityStore
             upsert.Parameters.AddWithValue("id", userId);
             upsert.Parameters.AddWithValue("email", email.Trim());
             upsert.Parameters.AddWithValue("admin_email", (object?)adminEmail ?? DBNull.Value);
+            upsert.Parameters.AddWithValue("super_admin_email", (object?)superAdminEmail ?? DBNull.Value);
             await upsert.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        return await GetByIdAsync(userId, connection, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ManagedUser>> GetUsersAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = """
+            select id, email, display_name, role, created_at, updated_at
+            from users
+            order by created_at desc;
+            """;
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var users = new List<ManagedUser>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            users.Add(new ManagedUser(
+                reader.GetGuid(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.GetString(3),
+                reader.GetFieldValue<DateTimeOffset>(4),
+                reader.GetFieldValue<DateTimeOffset>(5)));
+        }
+
+        return users;
+    }
+
+    public async Task<ManagedUser?> UpdateAdminAccessAsync(
+        Guid targetUserId,
+        bool makeAdmin,
+        Guid actorUserId,
+        CancellationToken cancellationToken = default)
+    {
+        if (targetUserId == actorUserId)
+            return null;
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = """
+            update users
+            set role = case when @make_admin then 'ADMIN' else 'USER' end,
+                updated_at = now()
+            where id = @id
+              and role <> 'SUPER_ADMIN'
+            returning id, email, display_name, role, created_at, updated_at;
+            """;
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("id", targetUserId);
+        command.Parameters.AddWithValue("make_admin", makeAdmin);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+            return null;
+
+        return new ManagedUser(
+            reader.GetGuid(0),
+            reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.GetString(3),
+            reader.GetFieldValue<DateTimeOffset>(4),
+            reader.GetFieldValue<DateTimeOffset>(5));
+    }
+
+    private static async Task<CurrentUser?> GetByIdAsync(
+        Guid userId,
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
         const string selectSql = """
             select id, email, display_name, role, created_at
             from users
