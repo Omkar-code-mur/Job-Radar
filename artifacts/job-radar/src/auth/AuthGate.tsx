@@ -176,10 +176,6 @@ export default function AuthGate({ children }: AuthGateProps) {
     setPassword('');
   }
 
-  if (checking) {
-    return <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">Checking session…</div>;
-  }
-
   const authValue = useMemo<AuthContextValue>(() => ({
     isAuthenticated: Boolean(session),
     requireLogin: () => {
