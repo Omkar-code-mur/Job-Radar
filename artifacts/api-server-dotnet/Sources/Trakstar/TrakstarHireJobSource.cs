@@ -25,11 +25,13 @@ public sealed class TrakstarHireJobSource(
         logger.LogInformation("Starting Trakstar Hire fetch for source {SourceId} ({CompanyName})", source.Id, companyName);
 
         using var listingResponse = await httpClient.GetAsync(listingUrl, cancellationToken);
-        if (!listingResponse.IsSuccessStatusCode)
-            listingResponse.EnsureSuccessStatusCode();
+        listingResponse.EnsureSuccessStatusCode();
 
         var listingHtml = await listingResponse.Content.ReadAsStringAsync(cancellationToken);
-        var jobUrls = ExtractJobUrls(listingHtml, listingUrl).Distinct(StringComparer.OrdinalIgnoreCase).Take(100).ToList();
+        var jobUrls = ExtractJobUrls(listingHtml, listingUrl)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(100)
+            .ToList();
 
         if (jobUrls.Count == 0)
         {
@@ -52,7 +54,7 @@ public sealed class TrakstarHireJobSource(
                 }
 
                 var html = await response.Content.ReadAsStringAsync(cancellationToken);
-                var posting = ParseJobPosting(html, jobUrl);
+                var posting = ParseJobPosting(html);
 
                 if (posting is null || string.IsNullOrWhiteSpace(posting.Title))
                 {
@@ -122,7 +124,11 @@ public sealed class TrakstarHireJobSource(
     private static IReadOnlyList<string> ExtractJobUrls(string html, string listingUrl)
     {
         var baseUri = new Uri(listingUrl);
-        var matches = Regex.Matches(html, @"hrefs*=s*[""']([^""']*/jobs/[^""'#?]+/?(?:?[^""'#]*)?)[""']", RegexOptions.IgnoreCase);
+        var matches = Regex.Matches(
+            html,
+            @"href\s*=\s*[""']([^""']*/jobs/[^""'#?]+/?(?:\?[^""'#]*)?)[""']",
+            RegexOptions.IgnoreCase);
+
         var urls = new List<string>();
 
         foreach (Match match in matches)
@@ -139,11 +145,11 @@ public sealed class TrakstarHireJobSource(
         return urls;
     }
 
-    private static JobPosting? ParseJobPosting(string html, string jobUrl)
+    private static JobPosting? ParseJobPosting(string html)
     {
         foreach (Match match in Regex.Matches(
                      html,
-                     @"<script[^>]+types*=s*[""']application/ld+json[""'][^>]*>(.*?)</script>",
+                     @"<script[^>]+type\s*=\s*[""']application/ld\+json[""'][^>]*>(.*?)</script>",
                      RegexOptions.IgnoreCase | RegexOptions.Singleline))
         {
             var raw = WebUtility.HtmlDecode(match.Groups[1].Value).Trim();
@@ -158,7 +164,7 @@ public sealed class TrakstarHireJobSource(
                     var typeName = type.ValueKind == JsonValueKind.String ? type.GetString() : null;
                     if (!string.Equals(typeName, "JobPosting", StringComparison.OrdinalIgnoreCase)) continue;
 
-                    return FromJsonLd(node, jobUrl);
+                    return FromJsonLd(node);
                 }
             }
             catch (JsonException)
@@ -168,7 +174,7 @@ public sealed class TrakstarHireJobSource(
         }
 
         var title = MatchText(html, @"<h1[^>]*>(.*?)</h1>") ?? MatchText(html, @"<title[^>]*>(.*?)</title>");
-        var location = MatchText(html, @"(?:Location|Job Location)s*:?s*</[^>]+>s*<[^>]+>(.*?)</");
+        var location = MatchText(html, @"(?:Location|Job Locations)\s*:?\s*</[^>]+>\s*<[^>]+>(.*?)</");
         return string.IsNullOrWhiteSpace(title)
             ? null
             : new JobPosting(WebUtility.HtmlDecode(title), null, location, null, null, null);
@@ -192,7 +198,7 @@ public sealed class TrakstarHireJobSource(
         }
     }
 
-    private static JobPosting FromJsonLd(JsonElement node, string jobUrl)
+    private static JobPosting FromJsonLd(JsonElement node)
     {
         var location = ReadLocation(node);
         var organization = node.TryGetProperty("hiringOrganization", out var org) &&
@@ -272,7 +278,7 @@ public sealed class TrakstarHireJobSource(
     }
 
     private static string StripHtml(string value)
-        => Regex.Replace(WebUtility.HtmlDecode(Regex.Replace(value, "<[^>]+>", " ")), @"s+", " ").Trim();
+        => Regex.Replace(WebUtility.HtmlDecode(Regex.Replace(value, "<[^>]+>", " ")), @"\s+", " ").Trim();
 
     private static string DetectWorkplace(string location, string description)
     {
