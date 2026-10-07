@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, Bell, Bookmark, BriefcaseBusiness, CheckCircle2, ClipboardList, LogIn, RefreshCw, Search, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
+import { ArrowDownUp, ArrowUpRight, Bell, Bookmark, BriefcaseBusiness, CheckCircle2, ClipboardList, LogIn, RefreshCw, Search, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
 
 type PublicJob = {
   id: string;
@@ -41,6 +41,7 @@ async function loadPublicJobs(search: string) {
 export default function PublicHome({ onRequireLogin }: { onRequireLogin: () => void }) {
   const [jobs, setJobs] = useState<PublicJob[]>([]);
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState('newest');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -55,7 +56,7 @@ export default function PublicHome({ onRequireLogin }: { onRequireLogin: () => v
 
   useEffect(() => { load(); }, []);
 
-  return (
+  const sortedJobs = jobs.slice().sort((a, b) => {\n    if (sort === 'oldest') return new Date(a.firstSeenAt).getTime() - new Date(b.firstSeenAt).getTime();\n    if (sort === 'posted') return new Date(b.postedDate).getTime() - new Date(a.postedDate).getTime();\n    if (sort === 'company') return a.company.localeCompare(b.company) || new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();\n    if (sort === 'title') return a.title.localeCompare(b.title) || new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();\n    return new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();\n  });\n\n  return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-8">
@@ -103,12 +104,12 @@ export default function PublicHome({ onRequireLogin }: { onRequireLogin: () => v
           </div>
         </section>
 
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-bold">Latest jobs</h2>
             <p className="mt-1 text-xs text-muted-foreground">Newest jobs added to Job Radar appear first.</p>
           </div>
-          <button type="button" className="btn btn-ghost" onClick={load} disabled={loading} aria-label="Refresh jobs">
+          <div className="flex items-center gap-2"><label className="flex items-center gap-2 text-xs text-muted-foreground"><ArrowDownUp size={14}/><span className="sr-only">Sort jobs</span><select value={sort} onChange={event => setSort(event.target.value)} className="field py-2 text-xs"><option value="newest">Newest added</option><option value="oldest">Oldest added</option><option value="posted">Recently posted</option><option value="company">Company A–Z</option><option value="title">Job title A–Z</option></select></label><button type="button" className="btn btn-ghost" onClick={load} disabled={loading} aria-label="Refresh jobs">
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
@@ -130,7 +131,7 @@ export default function PublicHome({ onRequireLogin }: { onRequireLogin: () => v
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {jobs.map(job => (
+            {sortedJobs.map(job => (
               <article key={job.id} className="card flex min-h-44 flex-col p-5 transition hover:-translate-y-0.5 hover:shadow-md">
                 <div className="flex gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">
