@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Trigger Job Radar scan
         env:
-          JOBRADAR_API_URL: https://api.graphforge.in
+          JOBRADAR_API_URL: https://job-radar-nfgv.onrender.com
           JOBRADAR_SCHEDULER_SECRET: ${{ secrets.JOBRADAR_SCHEDULER_SECRET }}
         run: |
           set -euo pipefail
