@@ -56,7 +56,15 @@ export default function PublicHome({ onRequireLogin }: { onRequireLogin: () => v
 
   useEffect(() => { load(); }, []);
 
-  const sortedJobs = jobs.slice().sort((a, b) => {\n    if (sort === 'oldest') return new Date(a.firstSeenAt).getTime() - new Date(b.firstSeenAt).getTime();\n    if (sort === 'posted') return new Date(b.postedDate).getTime() - new Date(a.postedDate).getTime();\n    if (sort === 'company') return a.company.localeCompare(b.company) || new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();\n    if (sort === 'title') return a.title.localeCompare(b.title) || new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();\n    return new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();\n  });\n\n  return (
+  const sortedJobs = jobs.slice().sort((a, b) => {
+    if (sort === 'oldest') return new Date(a.firstSeenAt).getTime() - new Date(b.firstSeenAt).getTime();
+    if (sort === 'posted') return new Date(b.postedDate).getTime() - new Date(a.postedDate).getTime();
+    if (sort === 'company') return a.company.localeCompare(b.company) || new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();
+    if (sort === 'title') return a.title.localeCompare(b.title) || new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();
+    return new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();
+  });
+
+  return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-8">
