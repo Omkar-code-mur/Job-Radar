@@ -117,10 +117,20 @@ export default function PublicHome({ onRequireLogin }: { onRequireLogin: () => v
             <h2 className="text-lg font-bold">Latest jobs</h2>
             <p className="mt-1 text-xs text-muted-foreground">Newest jobs added to Job Radar appear first.</p>
           </div>
-          <div className="flex items-center gap-2"><label className="flex items-center gap-2 text-xs text-muted-foreground"><ArrowDownUp size={14}/><span className="sr-only">Sort jobs</span><select value={sort} onChange={event => setSort(event.target.value)} className="field py-2 text-xs"><option value="newest">Newest added</option><option value="oldest">Oldest added</option><option value="posted">Recently posted</option><option value="company">Company A–Z</option><option value="title">Job title A–Z</option></select></label><button type="button" className="btn btn-ghost" onClick={load} disabled={loading} aria-label="Refresh jobs">
-            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-          </button>
-        </div>
+          <div className="flex items-center gap-2">
+            <ArrowDownUp size={14} className="text-muted-foreground" aria-hidden="true" />
+            <label className="sr-only" htmlFor="public-job-sort">Sort jobs</label>
+            <select id="public-job-sort" value={sort} onChange={event => setSort(event.target.value)} className="field py-2 text-xs">
+              <option value="newest">Newest added</option>
+              <option value="oldest">Oldest added</option>
+              <option value="posted">Recently posted</option>
+              <option value="company">Company A–Z</option>
+              <option value="title">Job title A–Z</option>
+            </select>
+            <button type="button" className="btn btn-ghost" onClick={load} disabled={loading} aria-label="Refresh jobs">
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </div>
 
         {loading ? (
           <div className="grid gap-3 sm:grid-cols-2">
