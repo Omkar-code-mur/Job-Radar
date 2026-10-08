@@ -131,6 +131,7 @@ export default function PublicHome({ onRequireLogin }: { onRequireLogin: () => v
               <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             </button>
           </div>
+        </div>
 
         {loading ? (
           <div className="grid gap-3 sm:grid-cols-2">
