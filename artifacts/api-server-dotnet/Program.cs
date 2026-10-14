@@ -19,7 +19,6 @@ var supabaseUrl = builder.Configuration["SUPABASE_URL"] ?? Environment.GetEnviro
 var supabaseKey = builder.Configuration["SUPABASE_ANON_KEY"] ?? builder.Configuration["SUPABASE_PUBLISHABLE_KEY"] ?? Environment.GetEnvironmentVariable("SUPABASE_ANON_KEY") ?? Environment.GetEnvironmentVariable("SUPABASE_PUBLISHABLE_KEY");
 var adminEmail = builder.Configuration["JOBRADAR_ADMIN_EMAIL"] ?? Environment.GetEnvironmentVariable("JOBRADAR_ADMIN_EMAIL");
 var superAdminEmail = builder.Configuration["JOBRADAR_SUPER_ADMIN_EMAIL"] ?? Environment.GetEnvironmentVariable("JOBRADAR_SUPER_ADMIN_EMAIL") ?? adminEmail;
-var schedulerSecret = builder.Configuration["JOBRADAR_SCHEDULER_SECRET"] ?? Environment.GetEnvironmentVariable("JOBRADAR_SCHEDULER_SECRET");
 if (string.IsNullOrWhiteSpace(supabaseUrl)) throw new InvalidOperationException("SUPABASE_URL must be configured.");
 if (string.IsNullOrWhiteSpace(supabaseKey)) throw new InvalidOperationException("SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY must be configured.");
 builder.Services.AddAuthentication("Supabase").AddScheme<AuthenticationSchemeOptions, SupabaseAuthenticationHandler>("Supabase", _ => { });
@@ -88,24 +87,6 @@ publicApi.MapGet("/jobs", async (HttpContext context, int? limit, string? search
     return Results.Ok(await baseStore.GetPublicJobsAsync(requestedLimit, search, ct));
 }).RequireRateLimiting("public-jobs");
 var monitorableSourceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "GREENHOUSE_API", "DELOITTE_USI", "TRAKSTAR_HIRE" };
-var schedulerApi = app.MapGroup("/api/internal/scheduler");
-schedulerApi.MapPost("/scan", async (HttpContext context, JobSourceFetcherFactory sourceFetcherFactory, CancellationToken ct) =>
-{
-    if (string.IsNullOrWhiteSpace(schedulerSecret)
-        || !context.Request.Headers.TryGetValue("X-JobRadar-Scheduler-Secret", out var providedSecret)
-        || !string.Equals(providedSecret.ToString(), schedulerSecret, StringComparison.Ordinal))
-    {
-        return Results.Unauthorized();
-    }
-
-    var sourceIds = (await store.GetSourcesAsync(ct))
-        .Where(source => source.Enabled && monitorableSourceTypes.Contains(source.Type))
-        .Select(source => source.Id)
-        .ToArray();
-
-    return Results.Ok(await store.ScanAsync(Guid.Empty, sourceIds, sourceFetcherFactory, ct));
-});
-var api = app.MapGroup("/api").RequireAuthorization();
 bool IsMonitorableSource(JobSource source) => source.Enabled && source.Status == "healthy" && monitorableSourceTypes.Contains(source.Type);
 bool IsAdminRole(string? role) => role is "ADMIN" or "SUPER_ADMIN";
 api.MapGet("/auth/me", async (HttpContext context, CancellationToken ct) => { var user = await userIdentityStore.GetOrCreateAsync(context.User, adminEmail, superAdminEmail, ct); return user is null ? Results.Unauthorized() : Results.Ok(user); });
