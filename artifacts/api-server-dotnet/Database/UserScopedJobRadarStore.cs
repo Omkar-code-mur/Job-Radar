@@ -122,7 +122,7 @@ public sealed class UserScopedJobRadarStore
         var stale = jobs.Where(job =>
             !matches.TryGetValue(job.Id, out var match)
             || match.ProfileFingerprint != profileFingerprint
-            || match.JobFingerprint != JobFingerprint(job)).ToArray();
+            || match.JobFingerprint != MatchFingerprint(job)).ToArray();
 
         if (stale.Length > 0)
         {
@@ -267,7 +267,7 @@ public sealed class UserScopedJobRadarStore
             command.Parameters.AddWithValue("breakdown", NpgsqlTypes.NpgsqlDbType.Jsonb, JsonSerializer.Serialize(job.Breakdown, JsonOptions));
             command.Parameters.AddWithValue("match_reasons", NpgsqlTypes.NpgsqlDbType.Jsonb, JsonSerializer.Serialize(job.MatchReasons ?? [], JsonOptions));
             command.Parameters.AddWithValue("profile_fingerprint", profileFingerprint);
-            command.Parameters.AddWithValue("job_fingerprint", JobFingerprint(job));
+            command.Parameters.AddWithValue("job_fingerprint", MatchFingerprint(job));
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
@@ -440,7 +440,8 @@ public sealed class UserScopedJobRadarStore
 
     private static int FreshnessScore(Job job)
     {
-        if (!DateTimeOffset.TryParse(job.LastSeenAt, out var date)) date = DateTimeOffset.TryParse(job.FirstSeenAt, out var first) ? first : DateTimeOffset.MinValue;
+        // LastSeenAt is ingestion metadata, not the job's publication date.
+        if (!DateTimeOffset.TryParse(job.PostedDate, out var date)) date = DateTimeOffset.TryParse(job.FirstSeenAt, out var first) ? first : DateTimeOffset.MinValue;
         var age = DateTimeOffset.UtcNow - date;
         if (age <= TimeSpan.FromDays(1)) return 100;
         if (age <= TimeSpan.FromDays(7)) return 80;
@@ -469,7 +470,11 @@ public sealed class UserScopedJobRadarStore
         => Hash(JsonSerializer.Serialize(new { profile.Roles, profile.Skills, profile.Technologies, profile.MinYears, profile.MaxYears, profile.Locations, profile.WorkplacePreference, profile.IncludeKeywords, profile.ExcludeKeywords, config }, JsonOptions));
 
     private static string JobFingerprint(Job job)
-        => Hash(JsonSerializer.Serialize(new { job.Title, job.Description, job.Location, job.WorkplaceType, job.Department, job.EmploymentType, job.PostedDate, job.LastSeenAt }, JsonOptions));
+        => Hash(JsonSerializer.Serialize(new { job.Title, job.Description, job.Location, job.WorkplaceType, job.Department, job.EmploymentType, job.PostedDate }, JsonOptions));
+
+    // Refresh the score daily so freshness decays without re-extracting job requirements.
+    private static string MatchFingerprint(Job job)
+        => Hash($"{JobFingerprint(job)}|{DateOnly.FromDateTime(DateTime.UtcNow):yyyy-MM-dd}");
 
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
