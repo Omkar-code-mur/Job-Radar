@@ -16,9 +16,9 @@ public sealed class AiJobIntelligenceProviderFactory
 
     public IAiJobIntelligenceProvider Create()
     {
-        var provider = _configuration["AI_PROVIDER"]
-            ?? Environment.GetEnvironmentVariable("AI_PROVIDER")
-            ?? "openai";
+        var configuredProvider = _configuration["AI_PROVIDER"] ?? Environment.GetEnvironmentVariable("AI_PROVIDER");
+        var hasOpenRouterKey = !string.IsNullOrWhiteSpace(_configuration["OPENROUTER_API_KEY"] ?? Environment.GetEnvironmentVariable("OPENROUTER_API_KEY"));
+        var provider = configuredProvider ?? (hasOpenRouterKey ? "openrouter" : "openai");
 
         return provider.Trim().ToLowerInvariant() switch
         {
