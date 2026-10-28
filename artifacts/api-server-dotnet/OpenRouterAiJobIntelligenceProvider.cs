@@ -19,11 +19,11 @@ public sealed class OpenRouterAiJobIntelligenceProvider : IAiJobIntelligenceProv
 
     public async Task<AiJobAnalysis> AnalyzeAsync(Job job, Profile profile, CancellationToken ct = default)
     {
-        var apiKey = GetSetting("OPENROUTER_API_KEY", "AI_API_KEY");
+        var apiKey = _configuration["OPENROUTER_API_KEY"] ?? Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
         if (string.IsNullOrWhiteSpace(apiKey))
             throw new AiNotConfiguredException("OpenRouter AI is not configured.");
 
-        var model = GetSetting("OPENROUTER_MODEL", "AI_MODEL");
+        var model = _configuration["OPENROUTER_MODEL"] ?? Environment.GetEnvironmentVariable("OPENROUTER_MODEL");
         if (string.IsNullOrWhiteSpace(model))
             model = "openrouter/free";
 
