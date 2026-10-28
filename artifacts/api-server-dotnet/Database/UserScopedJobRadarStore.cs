@@ -66,6 +66,15 @@ public sealed class UserScopedJobRadarStore
             alter table job_matches add column if not exists match_reasons jsonb not null default '[]';
             alter table job_matches add column if not exists profile_fingerprint text not null default '';
             alter table job_matches add column if not exists job_fingerprint text not null default '';
+            create table if not exists job_requirements (
+                job_id text primary key references jobs(id) on delete cascade,
+                job_fingerprint text not null,
+                detected_skills jsonb not null default '[]',
+                required_min_years integer,
+                required_max_years integer,
+                extraction_confidence integer not null default 0,
+                extracted_at timestamptz not null default now()
+            );
             create index if not exists ix_job_matches_user_score on job_matches(user_id, score desc);
             create index if not exists ix_job_matches_user_match on job_matches(user_id, is_match);
             """;
@@ -117,7 +126,8 @@ public sealed class UserScopedJobRadarStore
 
         if (stale.Length > 0)
         {
-            await UpsertMatchesAsync(userId, stale.Select(job => Score(job, profile, config, profileFingerprint)), profileFingerprint, cancellationToken);
+            var requirements = await GetOrExtractRequirementsAsync(stale, cancellationToken);
+            await UpsertMatchesAsync(userId, stale.Select(job => Score(job, requirements[job.Id], profile, config, profileFingerprint)), profileFingerprint, cancellationToken);
             matches = await GetMatchesAsync(userId, jobs.Select(job => job.Id), cancellationToken);
         }
 
@@ -186,7 +196,8 @@ public sealed class UserScopedJobRadarStore
         var profile = await _inner.GetProfileAsync(userId, cancellationToken);
         var config = await _inner.GetMatchingAsync(userId, cancellationToken);
         var fingerprint = ProfileFingerprint(profile, config);
-        await UpsertMatchesAsync(userId, jobs.Select(job => Score(job, profile, config, fingerprint)), fingerprint, cancellationToken);
+        var requirements = await GetOrExtractRequirementsAsync(jobs, cancellationToken);
+        await UpsertMatchesAsync(userId, jobs.Select(job => Score(job, requirements[job.Id], profile, config, fingerprint)), fingerprint, cancellationToken);
         return jobs.Count;
     }
 
@@ -262,16 +273,13 @@ public sealed class UserScopedJobRadarStore
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private static Job Score(Job job, Profile profile, MatchingConfiguration config, string profileFingerprint)
+    private static Job Score(Job job, JobRequirements requirements, Profile profile, MatchingConfiguration config, string profileFingerprint)
     {
         var title = job.Title ?? string.Empty;
         var description = job.Description ?? string.Empty;
         var searchable = $"{title} {description} {job.Department}".ToLowerInvariant();
         var candidateSkills = profile.Skills.Concat(profile.Technologies).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var detectedJobSkills = SkillAliases
-            .Where(group => group.Any(alias => ContainsTerm(searchable, alias)))
-            .Select(group => group[0])
-            .ToArray();
+        var detectedJobSkills = requirements.DetectedSkills;
 
         var matchedSkills = detectedJobSkills.Where(skill => candidateSkills.Any(candidate => SameSkill(candidate, skill))).ToArray();
         var missingSkills = detectedJobSkills.Except(matchedSkills, StringComparer.OrdinalIgnoreCase).ToArray();
@@ -285,7 +293,7 @@ public sealed class UserScopedJobRadarStore
             ? (candidateSkills.Length == 0 ? 35 : 55)
             : (int)Math.Round(100d * matchedSkills.Length / detectedJobSkills.Length);
 
-        var experienceScore = ExperienceScore(profile, searchable);
+        var experienceScore = ExperienceScore(profile, requirements);
         var locationScore = LocationScore(profile, job);
         var freshnessScore = FreshnessScore(job);
         // The existing ai_weight is retained for configuration compatibility. This component is a
@@ -324,13 +332,12 @@ public sealed class UserScopedJobRadarStore
         };
     }
 
-    private static int ExperienceScore(Profile profile, string text)
+    private static int ExperienceScore(Profile profile, JobRequirements requirements)
     {
         if (profile.MinYears == 0 && profile.MaxYears == 0) return 60;
-        var match = Regex.Match(text, @"(?<!\d)(\d{1,2})\s*(?:-|to)\s*(\d{1,2})\s*(?:years?|yrs?)\b|(?:minimum|min\.?|at least)\s*(\d{1,2})\s*(?:years?|yrs?)\b", RegexOptions.IgnoreCase);
-        if (!match.Success) return 65;
-        int requiredMin = match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : int.Parse(match.Groups[1].Value);
-        int requiredMax = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : requiredMin + 10;
+        if (requirements.RequiredMinYears is null) return 65;
+        int requiredMin = requirements.RequiredMinYears.Value;
+        int requiredMax = requirements.RequiredMaxYears ?? requiredMin + 10;
         if (profile.MaxYears >= requiredMin && profile.MinYears <= requiredMax) return 100;
         if (profile.MaxYears < requiredMin) return Math.Clamp(100 - (requiredMin - profile.MaxYears) * 20, 0, 60);
         return 65;
@@ -348,6 +355,87 @@ public sealed class UserScopedJobRadarStore
         var location = job.Location ?? string.Empty;
         var locationHit = profile.Locations.Any(candidate => ContainsTerm(location, candidate) || ContainsTerm(candidate, location));
         return (int)Math.Round((modeScore + (locationHit ? 100 : 25)) / 2d);
+    }
+
+    private async Task<Dictionary<string, JobRequirements>> GetOrExtractRequirementsAsync(IEnumerable<Job> sourceJobs, CancellationToken cancellationToken)
+    {
+        var jobs = sourceJobs.ToArray();
+        if (jobs.Length == 0) return [];
+        var ids = jobs.Select(job => job.Id).Distinct().ToArray();
+        var result = new Dictionary<string, JobRequirements>(StringComparer.Ordinal);
+        await using (var connection = new NpgsqlConnection(_connectionString))
+        {
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new NpgsqlCommand("""
+                select job_id, job_fingerprint, detected_skills, required_min_years, required_max_years, extraction_confidence
+                from job_requirements where job_id = any(@ids)
+                """, connection);
+            command.Parameters.AddWithValue("ids", ids);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                result[reader.GetString(0)] = new JobRequirements(
+                    reader.GetString(1),
+                    Json<string[]>(reader.GetFieldValue<string>(2)),
+                    reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                    reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                    reader.GetInt32(5));
+            }
+        }
+
+        var stale = jobs.Where(job => !result.TryGetValue(job.Id, out var current)
+            || current.JobFingerprint != JobFingerprint(job)).ToArray();
+        if (stale.Length == 0) return result;
+
+        await using var writeConnection = new NpgsqlConnection(_connectionString);
+        await writeConnection.OpenAsync(cancellationToken);
+        await using var transaction = await writeConnection.BeginTransactionAsync(cancellationToken);
+        foreach (var job in stale)
+        {
+            var extracted = ExtractRequirements(job);
+            const string sql = """
+                insert into job_requirements
+                    (job_id, job_fingerprint, detected_skills, required_min_years, required_max_years, extraction_confidence, extracted_at)
+                values (@job_id, @fingerprint, @skills, @min_years, @max_years, @confidence, now())
+                on conflict (job_id) do update set
+                    job_fingerprint = excluded.job_fingerprint,
+                    detected_skills = excluded.detected_skills,
+                    required_min_years = excluded.required_min_years,
+                    required_max_years = excluded.required_max_years,
+                    extraction_confidence = excluded.extraction_confidence,
+                    extracted_at = now()
+                """;
+            await using var command = new NpgsqlCommand(sql, writeConnection, transaction);
+            command.Parameters.AddWithValue("job_id", job.Id);
+            command.Parameters.AddWithValue("fingerprint", extracted.JobFingerprint);
+            command.Parameters.AddWithValue("skills", NpgsqlTypes.NpgsqlDbType.Jsonb, JsonSerializer.Serialize(extracted.DetectedSkills, JsonOptions));
+            command.Parameters.AddWithValue("min_years", (object?)extracted.RequiredMinYears ?? DBNull.Value);
+            command.Parameters.AddWithValue("max_years", (object?)extracted.RequiredMaxYears ?? DBNull.Value);
+            command.Parameters.AddWithValue("confidence", extracted.Confidence);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            result[job.Id] = extracted;
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    private static JobRequirements ExtractRequirements(Job job)
+    {
+        var searchable = $"{job.Title} {job.Description} {job.Department}".ToLowerInvariant();
+        var skills = SkillAliases
+            .Where(group => group.Any(alias => ContainsTerm(searchable, alias)))
+            .Select(group => group[0])
+            .ToArray();
+        var match = Regex.Match(searchable, @"(?<!\d)(\d{1,2})\s*(?:-|to)\s*(\d{1,2})\s*(?:years?|yrs?)\b|(?:minimum|min\.?|at least)\s*(\d{1,2})\s*(?:years?|yrs?)\b", RegexOptions.IgnoreCase);
+        int? minYears = null;
+        int? maxYears = null;
+        if (match.Success)
+        {
+            minYears = match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : int.Parse(match.Groups[1].Value);
+            maxYears = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : minYears + 10;
+        }
+        var confidence = skills.Length > 0 && minYears.HasValue ? 85 : skills.Length > 0 || minYears.HasValue ? 65 : 25;
+        return new JobRequirements(JobFingerprint(job), skills, minYears, maxYears, confidence);
     }
 
     private static int FreshnessScore(Job job)
@@ -387,6 +475,7 @@ public sealed class UserScopedJobRadarStore
 
     private static T Json<T>(string value) => JsonSerializer.Deserialize<T>(value, JsonOptions) ?? throw new InvalidOperationException("Invalid JSON in job_matches.");
 
+    private sealed record JobRequirements(string JobFingerprint, string[] DetectedSkills, int? RequiredMinYears, int? RequiredMaxYears, int Confidence);
     private sealed record JobMatch(
         int Score, bool IsMatch, string[] MatchedSkills, string[] MissingSkills, Breakdown Breakdown,
         string[] MatchReasons, string ProfileFingerprint, string JobFingerprint);
