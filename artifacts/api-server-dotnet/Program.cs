@@ -86,6 +86,7 @@ publicApi.MapGet("/jobs", async (HttpContext context, int? limit, string? search
     var requestedLimit = Math.Clamp(limit ?? 24, 1, 50);
     return Results.Ok(await baseStore.GetPublicJobsAsync(requestedLimit, search, ct));
 }).RequireRateLimiting("public-jobs");
+var api = app.MapGroup("/api");
 var monitorableSourceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "GREENHOUSE_API", "DELOITTE_USI", "TRAKSTAR_HIRE" };
 bool IsMonitorableSource(JobSource source) => source.Enabled && source.Status == "healthy" && monitorableSourceTypes.Contains(source.Type);
 bool IsAdminRole(string? role) => role is "ADMIN" or "SUPER_ADMIN";
